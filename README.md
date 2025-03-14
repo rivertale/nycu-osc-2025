@@ -2,7 +2,7 @@
 
 [lab1](https://github.com/rivertale/nycu-osc-2025/tree/lab1)
 
-[lab2]()
+[lab2](https://github.com/rivertale/nycu-osc-2025/tree/lab2)
 
 [lab3]()
 
