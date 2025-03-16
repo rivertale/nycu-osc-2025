@@ -276,8 +276,6 @@ heap_alloc(Heap *heap, umm size)
             HeapBlock *block0 = (HeapBlock *)((u8 *)block);
             HeapBlock *block1 = (HeapBlock *)((u8 *)block + split_size);
             
-            // NOTE: the block at lower address will be allocated first, this is crucial for 
-            // bootstrap bitmap allocation in heap_init()
             double_link_insert_at_last(&heap->free_block[order], block0);
             double_link_insert_at_last(&heap->free_block[order], block1);
         }
@@ -326,8 +324,6 @@ heap_init(Heap *heap, void *addr, umm size)
 {
     size = align2_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
     addr = (void *)align2_up((umm)addr, 16);
-    
-    // NOTE: addr must align to 16 byte, and size must be a power of two
     
     clear_memory(heap, sizeof(*heap));
     u64 max_block_count = size / HEAP_MIN_ALLOCATION;
