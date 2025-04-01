@@ -70,8 +70,8 @@ cpio_next_file(void *handle)
     u32 name_size = cpio_parse_newc_int(header->namesize);
     u32 file_size = cpio_parse_newc_int(header->filesize);
     
-    void *result = (void *)((u8 *)header + sizeof(*header) +
-                            align2_up(name_size, 2) + align2_up(file_size, 4));
+    void *result = (void *)((u8 *)header + align2_up(sizeof(*header) + name_size, 4) +
+                            align2_up(file_size, 4));
     if(!cpio_is_valid(result) || cpio_is_sentinel(result))
         result = 0;
     
@@ -107,7 +107,7 @@ cpio_get_file_content(void *handle, um32 *out_len)
     u32 name_size = cpio_parse_newc_int(header->namesize);
     u32 file_size = cpio_parse_newc_int(header->filesize);
     
-    u8 *result = (u8 *)header + sizeof(*header) + align2_up(name_size, 2);
+    u8 *result = (u8 *)header + align2_up(sizeof(*header) + name_size, 4);
     if(out_len)
         *out_len = file_size;
     return result;

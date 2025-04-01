@@ -37,6 +37,30 @@ mini_uart_write(void *buffer, umm size)
 }
 
 static void
+mini_uart_enable_read_exception(void)
+{
+    *(vu32 *)AUX_MU_IER_REG |= 1;
+}
+
+static void
+mini_uart_disable_read_exception(void)
+{
+    *(vu32 *)AUX_MU_IER_REG &= ~1;
+}
+
+static void
+mini_uart_enable_write_exception(void)
+{
+    *(vu32 *)AUX_MU_IER_REG |= 2;
+}
+
+static void
+mini_uart_disable_write_exception(void)
+{
+    *(vu32 *)AUX_MU_IER_REG &= ~2;
+}
+
+static void
 mini_uart_init(void)
 {
     *(vu32 *)GPFSEL1 &= ~((GPFSEL_ALT_MASK << 12) | (GPFSEL_ALT_MASK << 15));

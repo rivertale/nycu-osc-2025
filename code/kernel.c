@@ -5,17 +5,65 @@
 #include "mailbox.c"
 #include "cpio.c"
 
+static void print_buffer(c8 *buffer, umm size);
+static void print_string(c8 *message);
+static void print_hex32(u32 value);
+static void print_hex64(u64 value);
+static void print_u64(u64 value);
+#include "kernel_timer.c"
+#include "kernel_exception.c"
+
+static void
+read_console(void *buffer, u64 size)
+{
+    KernelState *state = &g_kernel_state;
+    mini_uart_enable_read_exception();
+    
+    u8 *byte = (u8 *)buffer;
+    while(size > 0)
+    {
+        if(state->read_cur0 != state->read_cur1)
+        {
+            *byte++ = state->read_buffer[state->read_cur0];
+            state->read_cur0 = (state->read_cur0 + 1) & KERNEL_IO_BUFFER_MASK;
+            --size;
+        }
+    }
+    
+    mini_uart_disable_read_exception();
+}
+
+static void
+write_console(void *buffer, u64 size)
+{
+    KernelState *state = &g_kernel_state;
+    
+    u8 *byte = (u8 *)buffer;
+    while(size > 0)
+    {
+        um32 next_write_cur1 = (state->write_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
+        while(size > 0 && next_write_cur1 != state->write_cur0)
+        {
+            state->write_buffer[state->write_cur1] = *byte++;
+            state->write_cur1 = next_write_cur1;
+            next_write_cur1 = (state->write_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
+            --size;
+        }
+        mini_uart_enable_write_exception();
+    }
+}
+
 static void
 print_buffer(c8 *buffer, umm size)
 {
-    mini_uart_write(buffer, size);
+    write_console(buffer, size);
 }
 
 static void
 print_string(c8 *message)
 {
     umm len = string_len(message);
-    mini_uart_write(message, len);
+    write_console(message, len);
 }
 
 static void
@@ -107,7 +155,8 @@ scan_line(c8 *string, um32 max_len)
         umm remaining_len = max_len;
         while(remaining_len > 1)
         {
-            c8 c = mini_uart_read_byte();
+            c8 c;
+            read_console(&c, sizeof(c));
             if(c == 0x8 || c == 0x7f) // NOTE: backspace generates a DEL on QEMU
             {
                 if(cur > string)
@@ -367,6 +416,15 @@ heap_init(Heap *heap, void *addr, umm size)
     assert(remaining_size == 0);
 }
 
+static
+KERNEL_TIMER_CALLBACK(timer_print_string)
+{
+    PrintStringTask *task = (PrintStringTask *)userdata;
+    print_string(task->string);
+    heap_free(task->heap, task->string);
+    heap_free(task->heap, task);
+}
+
 static u64
 parse_u64(c8 *buffer)
 {
@@ -431,10 +489,31 @@ next_token(c8 *token)
     return result;
 }
 
+static void
+init_kernel_state(KernelState *state)
+{
+    for(u32 index = 1; index < KERNEL_MAX_TIMER; ++index)
+    {
+        Timer *timer = state->timers + index;
+        timer->next_free = index - 1;
+    }
+    state->first_free_timer = KERNEL_MAX_TIMER - 1;
+    
+    for(u32 index = 1; index < KERNEL_MAX_INTERRUPT; ++index)
+    {
+        InterruptContext *interrupt = state->interrupts + index;
+        interrupt->next_free = index - 1;
+    }
+}
+
 void
 kernel_main(void *devicetree_addr)
 {
+    *(vu32 *)IRQ_ENABLED_1 |= IRQ_AUX_INT;
     mini_uart_init();
+    init_timer_for_core_0();
+    
+    init_kernel_state(&g_kernel_state);
     
     Heap heap;
     heap_init(&heap, &heap_begin, (umm)&heap_size);
@@ -553,7 +632,11 @@ kernel_main(void *devicetree_addr)
                 print_string("Total ");
                 print_u64(heap.in_used);
                 print_string(" byte left\r\n");
-                
+            }
+            else
+            {
+                c8 *usage = "Usage: free <ptr>\r\n";
+                print_string(usage);
             }
         }
         else if(string_match(token, "reboot"))
@@ -561,11 +644,58 @@ kernel_main(void *devicetree_addr)
             print_string("Rebooting...\r\n");
             watchdog_reboot(1000);
         }
+        else if(string_match(token, "timer"))
+        {
+            if(token_count == 3)
+            {
+                c8 *message = next_token(token);
+                u64 seconds = parse_u64(next_token(message));
+                u64 expiration = seconds * get_timer_frequency();
+                
+                um32 len = string_len(message);
+                PrintStringTask *task = heap_alloc(&heap, sizeof(*task));
+                task->heap = &heap;
+                task->string = (c8 *)heap_alloc(&heap, len + 1);
+                copy_memory(task->string, message, len + 1);
+                
+                PrintStringTask *task1 = heap_alloc(&heap, sizeof(*task1));
+                task1->heap = &heap;
+                task1->string = (c8 *)heap_alloc(&heap, len + 1);
+                copy_memory(task1->string, message, len + 1);
+                
+                add_timer(expiration, timer_print_string, task);
+                add_timer(expiration, timer_print_string, task1);
+            }
+            else
+            {
+                c8 *usage = "Usage: timer <message> <seconds>\r\n";
+                print_string(usage);
+            }
+        }
         else
         {
-            print_string("Unrecognized command: ");
-            print_string(token);
-            print_string("\r\n");
+            c8 *file_name = token;
+            void *handle = cpio_find_file(file_name);
+            if(handle)
+            {
+                um32 len;
+                c8 *content = (c8 *)cpio_get_file_content(handle, &len);
+                void *load_addr = (void *)USER_SPACE_BEGIN;
+                void *stack_end = (void *)USER_SPACE_END;
+                copy_memory(load_addr, content, len);
+                __asm__ volatile("mov x0, 0x3c0\n"
+                                 "msr spsr_el1, x0\n"
+                                 "msr elr_el1, %0\n"
+                                 "msr sp_el0, %1\n"
+                                 "eret\n"
+                                 :: "r"(load_addr), "r"(stack_end));
+            }
+            else
+            {
+                print_string("Unrecognized command: ");
+                print_string(token);
+                print_string("\r\n");
+            }
         }
     }
 }

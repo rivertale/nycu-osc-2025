@@ -15,16 +15,12 @@ SECTIONS
 
     . = ALIGN(0x10);
     heap_begin = .;
-    . += 0x100000; /* 1mb heap */
-    . = ALIGN(0x10);
-    heap_end = .;
+    heap_end = 0x200000;
     heap_size = heap_end - heap_begin;
 
     . = ALIGN(0x10);
     stack_begin = .;
-    . += 0x100000; /* 1mb stack */
-    . = ALIGN(0x10);
-    stack_end = .;
+    stack_end = 0x300000;
 
     _end = .;
 }
