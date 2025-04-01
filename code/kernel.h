@@ -65,6 +65,8 @@ typedef struct Heap
     u8 *base;
     u64 *served;
     HeapBlock free_block[HEAP_MAX_ORDER + 1];
+    u8 *memory;
+    umm memory_used;
 } Heap;
 
 #define KERNEL_MAX_IO_BUFFER_SIZE 4096

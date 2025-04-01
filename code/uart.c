@@ -37,6 +37,30 @@ mini_uart_write(void *buffer, umm size)
 }
 
 static void
+mini_uart_write_u64(u64 value)
+{
+    c8 digits[32];
+    
+    um32 cur = array_count(digits);
+    if(value > 0)
+    {
+        while(value > 0)
+        {
+            digits[--cur] = value % 10 + '0';
+            value /= 10;
+        }
+    }
+    else
+    {
+        digits[--cur] = '0';
+    }
+    
+    for(c8 *c = digits + cur; *c; ++c)
+        mini_uart_write_byte(*c);
+}
+
+
+static void
 mini_uart_enable_read_exception(void)
 {
     *(vu32 *)AUX_MU_IER_REG |= 1;

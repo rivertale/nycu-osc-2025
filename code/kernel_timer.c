@@ -68,6 +68,7 @@ add_timer(u64 expiration, KernelTimerCallback *callback, void *userdata)
                 break;
             index_ptr = &link->next_expired;
         }
+        timer->next_expired = *index_ptr;
         *index_ptr = index;
         
         if(state->first_expired_timer == index)
@@ -75,6 +76,7 @@ add_timer(u64 expiration, KernelTimerCallback *callback, void *userdata)
             set_timer_expiration(timer->tick);
             enable_timer();
         }
+        
     }
     
     return result;

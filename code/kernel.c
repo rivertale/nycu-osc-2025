@@ -49,6 +49,7 @@ write_console(void *buffer, u64 size)
             next_write_cur1 = (state->write_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
             --size;
         }
+        
         mini_uart_enable_write_exception();
     }
 }
@@ -288,6 +289,11 @@ heap_is_served(Heap *heap, s32 order, void *block)
 static void *
 heap_alloc(Heap *heap, umm size)
 {
+    void *result1 = (void *)(heap->memory + heap->memory_used);
+    heap->memory_used += size;
+    return result1;
+    
+    return 0;
     void *result = 0;
     if(size > 0)
     {
@@ -339,6 +345,7 @@ heap_alloc(Heap *heap, umm size)
 static void
 heap_free(Heap *heap, void *ptr)
 {
+    return;
     HeapBlock *block = (HeapBlock *)ptr;
     s32 order = HEAP_MIN_ORDER;
     while(order <= HEAP_MAX_ORDER)
@@ -371,6 +378,8 @@ heap_free(Heap *heap, void *ptr)
 static void
 heap_init(Heap *heap, void *addr, umm size)
 {
+    heap->memory = addr;
+    
     size = align2_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
     addr = (void *)align2_up((umm)addr, 16);
     
@@ -423,6 +432,17 @@ KERNEL_TIMER_CALLBACK(timer_print_string)
     print_string(task->string);
     heap_free(task->heap, task->string);
     heap_free(task->heap, task);
+}
+
+static
+KERNEL_TIMER_CALLBACK(timer_tell_time)
+{
+    u64 freq = get_timer_frequency();
+    u64 expiration = 2 * freq;
+    add_timer(expiration, timer_tell_time, 0);
+    print_string("Seconds after boot: ");
+    print_u64(get_timer_current_tick() / freq);
+    print_string("\r\n");
 }
 
 static u64
@@ -521,6 +541,7 @@ kernel_main(void *devicetree_addr)
     // devicetree_traverse(devicetree_addr, print_devicetree, 0);
     devicetree_traverse(devicetree_addr, match_and_init_cpio, &g_cpio_base);
     
+    add_timer(0, timer_tell_time, 0);
     print_string("Hello, Sailor!\r\n");
     for(;;)
     {
@@ -658,13 +679,7 @@ kernel_main(void *devicetree_addr)
                 task->string = (c8 *)heap_alloc(&heap, len + 1);
                 copy_memory(task->string, message, len + 1);
                 
-                PrintStringTask *task1 = heap_alloc(&heap, sizeof(*task1));
-                task1->heap = &heap;
-                task1->string = (c8 *)heap_alloc(&heap, len + 1);
-                copy_memory(task1->string, message, len + 1);
-                
                 add_timer(expiration, timer_print_string, task);
-                add_timer(expiration, timer_print_string, task1);
             }
             else
             {
@@ -683,7 +698,7 @@ kernel_main(void *devicetree_addr)
                 void *load_addr = (void *)USER_SPACE_BEGIN;
                 void *stack_end = (void *)USER_SPACE_END;
                 copy_memory(load_addr, content, len);
-                __asm__ volatile("mov x0, 0x3c0\n"
+                __asm__ volatile("mov x0, 0x340\n"
                                  "msr spsr_el1, x0\n"
                                  "msr elr_el1, %0\n"
                                  "msr sp_el0, %1\n"

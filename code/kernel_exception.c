@@ -29,6 +29,7 @@ add_interrupt(InterruptKind kind)
 void
 exception_handler_el1_cur_sync(void)
 {
+    __asm__ volatile("msr DAIFSet, 0xf");
     u64 spsr_el1 = 0;
     u64 elr_el1 = 0;
     u64 esr_el1 = 0;
@@ -47,6 +48,7 @@ exception_handler_el1_cur_sync(void)
     print_string("esr_el1=");
     print_hex64(esr_el1);
     print_string("\r\n");
+    __asm__ volatile("msr DAIFClr, 0xf");
 }
 
 void
@@ -57,28 +59,29 @@ exception_handler_el1_cur_irq(void)
     u32 pending = *(vu32 *)IRQ_PENDING_1;
     if(pending & IRQ_AUX_INT)
     {
-        *(vu32 *)IRQ_ENABLED_1 &= ~IRQ_AUX_INT;
-        
         // UART
-        if(*(vu32 *)AUX_MU_IIR_REG & 0x2)
+        if((*(vu32 *)AUX_MU_IIR_REG & 0x1) == 0)
         {
-            if(state->write_cur0 != state->write_cur1)
+            *(vu32 *)IRQ_ENABLED_1 &= ~IRQ_AUX_INT;
+            if(*(vu32 *)AUX_MU_IIR_REG & 0x2)
             {
-                *(vu32 *)AUX_MU_IO_REG = state->write_buffer[state->write_cur0];
-                state->write_cur0 = (state->write_cur0 + 1) & KERNEL_IO_BUFFER_MASK;
+                if(state->write_cur0 != state->write_cur1)
+                {
+                    *(vu32 *)AUX_MU_IO_REG = state->write_buffer[state->write_cur0];
+                    state->write_cur0 = (state->write_cur0 + 1) & KERNEL_IO_BUFFER_MASK;
+                }
+                else
+                {
+                    mini_uart_disable_write_exception();
+                }
             }
-            else
+            else if(*(vu32 *)AUX_MU_IIR_REG & 0x4)
             {
-                mini_uart_disable_write_exception();
+                g_kernel_state.read_buffer[state->read_cur1] = *(vu32 *)AUX_MU_IO_REG;
+                state->read_cur1 = (state->read_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
             }
+            *(vu32 *)IRQ_ENABLED_1 |= IRQ_AUX_INT;
         }
-        else if(*(vu32 *)AUX_MU_IIR_REG & 0x4)
-        {
-            g_kernel_state.read_buffer[state->read_cur1] = *(vu32 *)AUX_MU_IO_REG;
-            state->read_cur1 = (state->read_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
-        }
-        
-        *(vu32 *)IRQ_ENABLED_1 |= IRQ_AUX_INT;
     }
     else
     {
@@ -106,6 +109,7 @@ exception_handler_el1_cur_irq(void)
 void
 exception_handler_el1_low_sync(void)
 {
+    __asm__ volatile("msr DAIFSet, 0xf");
     u64 spsr_el1 = 0;
     u64 elr_el1 = 0;
     u64 esr_el1 = 0;
@@ -129,6 +133,7 @@ exception_handler_el1_low_sync(void)
 void
 exception_handler_el1_low_irq(void)
 {
+    __asm__ volatile("msr DAIFSet, 0xf");
     u64 spsr_el1 = 0;
     u64 elr_el1 = 0;
     u64 esr_el1 = 0;
@@ -147,6 +152,7 @@ exception_handler_el1_low_irq(void)
     print_string("esr_el1=");
     print_hex64(esr_el1);
     print_string("\r\n");
+    __asm__ volatile("msr DAIFClr, 0xf");
 }
 
 void
