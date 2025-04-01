@@ -133,26 +133,7 @@ exception_handler_el1_low_sync(void)
 void
 exception_handler_el1_low_irq(void)
 {
-    __asm__ volatile("msr DAIFSet, 0xf");
-    u64 spsr_el1 = 0;
-    u64 elr_el1 = 0;
-    u64 esr_el1 = 0;
-    
-    __asm__ volatile("mrs %0, spsr_el1\n"
-                     "mrs %1, elr_el1\n"
-                     "mrs %2, esr_el1\n"
-                     : "=r"(spsr_el1), "=r"(elr_el1), "=r"(esr_el1));
-    
-    print_string("spsr_el1=");
-    print_hex64(spsr_el1);
-    print_string("\r\n");
-    print_string("elr_el1=");
-    print_hex64(elr_el1);
-    print_string("\r\n");
-    print_string("esr_el1=");
-    print_hex64(esr_el1);
-    print_string("\r\n");
-    __asm__ volatile("msr DAIFClr, 0xf");
+    exception_handler_el1_cur_irq();
 }
 
 void
