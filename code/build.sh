@@ -13,23 +13,23 @@ link_flags="-m aarch64elf"
 image_flags="--output-target=aarch64-rpi3-elf -O binary"
 
 echo "Compiling bootloader..."
-clang ${compile_flags} ${code_dir}/bootloader_startup.S ${code_dir}/bootloader.c
-ld.lld ${link_flags} -T ${code_dir}/bootloader.ld -o bootloader.elf bootloader_startup.o bootloader.o
-llvm-objcopy ${image_flags} bootloader.elf bootloader.img
+clang-18 ${compile_flags} ${code_dir}/bootloader_startup.S ${code_dir}/bootloader.c
+ld.lld-18 ${link_flags} -T ${code_dir}/bootloader.ld -o bootloader.elf bootloader_startup.o bootloader.o
+llvm-objcopy-18 ${image_flags} bootloader.elf bootloader.img
 
 echo "Compiling kernel..."
-clang ${compile_flags} ${code_dir}/kernel_startup.S ${code_dir}/kernel.c
-ld.lld ${link_flags} -T ${code_dir}/kernel.ld -o kernel.elf kernel_startup.o kernel.o
-llvm-objcopy ${image_flags} kernel.elf kernel.img
+clang-18 ${compile_flags} ${code_dir}/kernel_startup.S ${code_dir}/kernel.c
+ld.lld-18 ${link_flags} -T ${code_dir}/kernel.ld -o kernel.elf kernel_startup.o kernel.o
+llvm-objcopy-18 ${image_flags} kernel.elf kernel.img
 
 echo "Compiling user programs..."
-clang ${compile_flags} ${code_dir}/user_exception.S
-ld.lld ${link_flags} -o user_exception.elf user_exception.o
-llvm-objcopy ${image_flags} user_exception.elf user_exception.img
+clang-18 ${compile_flags} ${code_dir}/user_exception.S
+ld.lld-18 ${link_flags} -o user_exception.elf user_exception.o
+llvm-objcopy-18 ${image_flags} user_exception.elf user_exception.img
 
 echo "Compiling tools..."
-clang -g -o send_kernel ${code_dir}/send_kernel.c
-clang -g -o cal ${code_dir}/cal.c
+clang-18 -g -o send_kernel ${code_dir}/send_kernel.c
+clang-18 -g -o cal ${code_dir}/cal.c
 
 echo "Building initial file system..."
 cd ${data_dir}/initramfs

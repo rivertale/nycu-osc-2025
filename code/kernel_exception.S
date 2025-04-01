@@ -85,30 +85,35 @@ exception_vector_table:
     .align 7
 
 exception_entry_el1_cur_sync:
+    msr DAIFSet, 0xf
     save_registers_to_stack
     bl exception_handler_el1_cur_sync
     load_registers_from_stack
     eret
 
 exception_entry_el1_cur_irq:
+    msr DAIFSet, 0xf
     save_registers_to_stack
     bl exception_handler_el1_cur_irq
     load_registers_from_stack
     eret
 
 exception_entry_el1_low_sync:
+    msr DAIFSet, 0xf
     save_registers_to_stack
     bl exception_handler_el1_low_sync
     load_registers_from_stack
     eret
 
 exception_entry_el1_low_irq:
+    msr DAIFSet, 0xf
     save_registers_to_stack
     bl exception_handler_el1_low_irq
     load_registers_from_stack
     eret
 
 exception_entry_default:
+    msr DAIFSet, 0xf
     save_registers_to_stack
     bl exception_handler_default
     load_registers_from_stack
