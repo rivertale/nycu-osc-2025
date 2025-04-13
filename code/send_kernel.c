@@ -1,5 +1,5 @@
 #include "common.h"
-#include "bootloader_boot.h"
+#include "bootloader.h"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -137,7 +137,7 @@ main(int arg_count, c8 **args)
     
     LoadedFile kernel = read_entire_file(kernel_path);
     BootHeader header = {0};
-    header.magic = BOOT_MAGIC;
+    header.magic = KERNEL_MAGIC;
     header.size = kernel.size;
     header.checksum = calculate_kernel_checksum(kernel.buffer, kernel.size);
     

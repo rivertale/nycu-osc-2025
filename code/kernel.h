@@ -2,11 +2,12 @@
 #define KERNEL_H
 
 #include "common.h"
-#include "devicetree.h"
-#include "watchdog.h"
+#include "kernel_cpio.h"
+#include "kernel_devicetree.h"
+#include "kernel_mailbox.h"
+#include "kernel_memory.h"
+#include "kernel_watchdog.h"
 #include "uart.h"
-#include "mailbox.h"
-#include "cpio.h"
 
 #define IRQ_AUX_INT (1 << 29)
 #define IRQ_PENDING_1 0x3f00b204
@@ -88,7 +89,7 @@ typedef struct Timer
 
 typedef struct PrintStringTask
 {
-    Heap *heap;
+    MemoryAllocator *allocator;
     c8 *string;
 } PrintStringTask;
 

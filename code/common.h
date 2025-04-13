@@ -19,10 +19,55 @@ typedef u64 umm;
 typedef volatile u32 vu32;
 
 
-#define do_nothing
+#define do_nothing (void)0
 #define array_count(array) (sizeof(array) / sizeof(array[0]))
-#define assert(condition) if(!(condition)) __asm__ volatile ("brk #0")
 #define wait_cycle(delay) for(u32 i = 0; i < delay; ++i) __asm__ volatile("nop")
+#define kilobytes(value) ((value) << 10)
+#define megabytes(value) (kilobytes(value) << 10)
+#define gigabytes(value) ((u64)megabytes(value) << 10)
+
+#define debug_log(log) debug_log1(log, __FILE__, __LINE__)
+#define debug_log1(log, file, line) debug_log2(log, file, #line)
+#define debug_log2(log, file, line) mini_uart_write_const("[DEBUG] "file"("line"): "log);
+
+#define assert(condition) assert1(condition, __FILE__, __LINE__)
+#define assert1(condition, file, line) assert2(condition, file, #line)
+#define assert2(condition, file, line) \
+do \
+{ \
+    mini_uart_write_const(file"("line"): assertion failed\r\n"); \
+    __asm__ volatile ("wfe"); \
+} while(0)
+
+static s32
+count_leading_zeros(u64 value)
+{
+    s64 result = 0;
+    __asm__ volatile ("clz %0, %1" : "=r"(result) : "r"(value));
+    return result;
+}
+
+static s32
+count_trailing_zeros(u64 value)
+{
+    s64 result = 0;
+    __asm__ volatile ("rbit %0, %0\n"
+                      "clz %1, %0\n"
+                      : "=r"(result) : "r"(value));
+    return result;
+}
+
+static s32
+find_most_significant_bit(u64 value)
+{
+    return 63 - count_leading_zeros(value);
+}
+
+static s32
+find_least_significant_bit(u64 value)
+{
+    return count_trailing_zeros(value);
+}
 
 static u64
 next_power_of_two(u64 value)
@@ -38,10 +83,17 @@ next_power_of_two(u64 value)
 }
 
 static u64
-align2_up(u64 value, s32 alignment)
+align_up(u64 value, u64 alignment)
 {
     u64 mask = alignment - 1;
     return (value + mask) & ~mask;
+}
+
+static u64
+align_down(u64 value, u64 alignment)
+{
+    u64 mask = alignment - 1;
+    return value & ~mask;
 }
 
 static void

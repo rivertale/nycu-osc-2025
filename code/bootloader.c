@@ -1,6 +1,3 @@
-#include "common.h"
-#include "uart.h"
-#include "bootloader_boot.h"
 #include "bootloader.h"
 
 #include "uart.c"
@@ -19,7 +16,7 @@ load_kernel(void *addr)
     
     u32 magic = 0;
     mini_uart_read(&magic, sizeof(magic));
-    if(magic == BOOT_MAGIC)
+    if(magic == KERNEL_MAGIC)
     {
         BootHeader header = {0};
         header.magic = magic;
@@ -38,7 +35,7 @@ bootloader_main(void *devicetree_addr)
     mini_uart_init();
     for(;;)
     {
-        mini_uart_write_const(BOOTLOAD_WAIT_KERNEL_MESSAGE);
+        mini_uart_write_const("Waiting for kernel...\r\n");
         if(load_kernel(KERNEL_STARTUP_ADDR))
         {
             __asm__ volatile("mov x0, %0\n"

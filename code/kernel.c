@@ -1,9 +1,10 @@
 #include "kernel.h"
-#include "devicetree.c"
-#include "watchdog.c"
+#include "kernel_cpio.c"
+#include "kernel_devicetree.c"
+#include "kernel_mailbox.c"
+#include "kernel_memory.c"
+#include "kernel_watchdog.c"
 #include "uart.c"
-#include "mailbox.c"
-#include "cpio.c"
 
 static void print_buffer(c8 *buffer, umm size);
 static void print_string(c8 *message);
@@ -229,33 +230,6 @@ DEVICETREE_CALLBACK(print_devicetree)
     return 0;
 }
 
-static s32
-count_leading_zeros(u64 value)
-{
-    s64 result = 0;
-    __asm__ volatile ("clz %0, %1" : "=r"(result) : "r"(value));
-    return result;
-}
-
-static s32
-get_most_significant_bit_position(u64 value)
-{
-    return 63 - count_leading_zeros(value);
-}
-
-static s32
-align_to_power_of_two(u64 value)
-{
-    --value;
-    value |= value >> 1;
-    value |= value >> 2;
-    value |= value >> 4;
-    value |= value >> 8;
-    value |= value >> 16;
-    value |= value >> 32;
-    return value + 1;
-}
-
 static u64
 heap_get_served_bit_index(Heap *heap, s32 order, void *block)
 {
@@ -301,7 +275,7 @@ heap_alloc(Heap *heap, umm size)
             size = HEAP_MIN_ALLOCATION;
         size = next_power_of_two(size);
         
-        s32 alloc_order = get_most_significant_bit_position(size);
+        s32 alloc_order = find_most_significant_bit(size);
         assert(HEAP_MIN_ORDER <= alloc_order && alloc_order <= HEAP_MAX_ORDER);
         heap->in_used += (1 << alloc_order);
         
@@ -380,17 +354,17 @@ heap_init(Heap *heap, void *addr, umm size)
 {
     heap->memory = addr;
     
-    size = align2_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
-    addr = (void *)align2_up((umm)addr, 16);
+    size = align_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
+    addr = (void *)align_up((umm)addr, 16);
     
     clear_memory(heap, sizeof(*heap));
     u64 max_block_count = size / HEAP_MIN_ALLOCATION;
     u64 max_served_count = max_block_count << 1;
-    u64 served_size = align2_up(max_served_count, 8 * HEAP_MIN_ALLOCATION) / 8;
+    u64 served_size = align_up(max_served_count, 8 * HEAP_MIN_ALLOCATION) / 8;
     
     heap->total = size;
     heap->served_mask = max_served_count - 1;
-    heap->order_shift = get_most_significant_bit_position(max_block_count) + 1;
+    heap->order_shift = find_most_significant_bit(max_block_count) + 1;
     heap->base = addr;
     heap->served = (u64 *)addr;
     
@@ -398,7 +372,7 @@ heap_init(Heap *heap, void *addr, umm size)
     for(s32 order = HEAP_MIN_ORDER; order <= HEAP_MAX_ORDER; ++order)
         double_link_init(&heap->free_block[order]);
     
-    s32 order = get_most_significant_bit_position(served_size);
+    s32 order = find_most_significant_bit(served_size);
     umm block_size = 1 << order;
     u8 *cur = (u8 *)addr + block_size;
     umm remaining_size = size - block_size;
@@ -430,8 +404,8 @@ KERNEL_TIMER_CALLBACK(timer_print_string)
 {
     PrintStringTask *task = (PrintStringTask *)userdata;
     print_string(task->string);
-    heap_free(task->heap, task->string);
-    heap_free(task->heap, task);
+    free_memory(task->allocator, task->string);
+    free_memory(task->allocator, task);
 }
 
 static
@@ -535,8 +509,16 @@ kernel_main(void *devicetree_addr)
     
     init_kernel_state(&g_kernel_state);
     
-    Heap heap;
-    heap_init(&heap, &heap_begin, (umm)&heap_size);
+    BootArena *boot_arena = bootstrap_boot_arena((void *)0x10000000, megabytes(16));
+    MemoryRegionList *region_list = push_size(boot_arena, sizeof(*region_list));
+    init_memory_region_list(region_list, (void *)0x00000000, (void *)0x3c000000);
+    reserve_memory_region(region_list, (void *)0x0000, (void *)0x1000); // spin tables
+    
+    PagePool page_pool;
+    init_page_pool(&page_pool, region_list);
+    
+    MemoryAllocator allocator;
+    init_memory_allocator(&allocator, &page_pool);
     
     // devicetree_traverse(devicetree_addr, print_devicetree, 0);
     devicetree_traverse(devicetree_addr, match_and_init_cpio, &g_cpio_base);
@@ -631,12 +613,9 @@ kernel_main(void *devicetree_addr)
             if(token_count == 2)
             {
                 umm size = parse_u64(next_token(token));
-                void *ptr = heap_alloc(&heap, size);
+                void *ptr = alloc_memory(&allocator, size);
                 print_hex64((umm)ptr);
                 print_string("\r\n");
-                print_string("Total ");
-                print_u64(heap.in_used);
-                print_string(" byte allocated\r\n");
             }
             else
             {
@@ -649,10 +628,7 @@ kernel_main(void *devicetree_addr)
             if(token_count == 2)
             {
                 void *ptr = (void *)parse_hex64(next_token(token));
-                heap_free(&heap, ptr);
-                print_string("Total ");
-                print_u64(heap.in_used);
-                print_string(" byte left\r\n");
+                free_memory(&allocator, ptr);
             }
             else
             {
@@ -674,9 +650,9 @@ kernel_main(void *devicetree_addr)
                 u64 expiration = seconds * get_timer_frequency();
                 
                 um32 len = string_len(message);
-                PrintStringTask *task = heap_alloc(&heap, sizeof(*task));
-                task->heap = &heap;
-                task->string = (c8 *)heap_alloc(&heap, len + 1);
+                PrintStringTask *task = alloc_memory(&allocator, sizeof(*task));
+                task->allocator = &allocator;
+                task->string = (c8 *)alloc_memory(&allocator, len + 1);
                 copy_memory(task->string, message, len + 1);
                 
                 add_timer(expiration, timer_print_string, task);

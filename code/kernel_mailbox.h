@@ -1,5 +1,5 @@
-#ifndef MAILBOX_H
-#define MAILBOX_H
+#ifndef KERNEL_MAILBOX_H
+#define KERNEL_MAILBOX_H
 
 #define MAILBOX_READ 0x3f00b880
 #define MAILBOX_STATUS 0x3f00b898
@@ -23,4 +23,4 @@ typedef struct ArmMemoryInfo
     u32 size;
 } __attribute__((aligned(8))) ArmMemoryInfo;
 
-#endif //MAILBOX_H
+#endif //KERNEL_MAILBOX_H

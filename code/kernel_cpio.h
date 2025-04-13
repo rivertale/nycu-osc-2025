@@ -1,5 +1,5 @@
-#ifndef CPIO_H
-#define CPIO_H
+#ifndef KERNEL_CPIO_H
+#define KERNEL_CPIO_H
 
 #define CPIO_MAGIC "070701"
 #define CPIO_SENTINEL_FILE "TRAILER!!!"
@@ -29,4 +29,4 @@ typedef struct CpioNewcHeader
 
 static void *g_cpio_base = 0;
 
-#endif //CPIO_H
+#endif //KERNEL_CPIO_H
