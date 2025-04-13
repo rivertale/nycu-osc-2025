@@ -1,9 +1,9 @@
 #include "kernel.h"
-#include "devicetree.c"
-#include "watchdog.c"
+#include "kernel_cpio.c"
+#include "kernel_devicetree.c"
+#include "kernel_mailbox.c"
+#include "kernel_watchdog.c"
 #include "uart.c"
-#include "mailbox.c"
-#include "cpio.c"
 
 static void print_buffer(c8 *buffer, umm size);
 static void print_string(c8 *message);
@@ -211,7 +211,7 @@ DEVICETREE_CALLBACK(print_devicetree)
         if(index != 0)
             print_string(", ");
         
-        c8 hex_digits[16] =
+        static c8 hex_digits[16] =
         {
             '0', '1', '2', '3', '4', '5', '6', '7',
             '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
@@ -223,6 +223,7 @@ DEVICETREE_CALLBACK(print_devicetree)
             hex_digits[(prop[index] >> 0) & 15],
             '\0'
         };
+        
         print_string(byte);
     }
     print_string(" }\r\n");
@@ -289,11 +290,6 @@ heap_is_served(Heap *heap, s32 order, void *block)
 static void *
 heap_alloc(Heap *heap, umm size)
 {
-    void *result1 = (void *)(heap->memory + heap->memory_used);
-    heap->memory_used += size;
-    return result1;
-    
-    return 0;
     void *result = 0;
     if(size > 0)
     {
@@ -302,8 +298,9 @@ heap_alloc(Heap *heap, umm size)
         size = next_power_of_two(size);
         
         s32 alloc_order = get_most_significant_bit_position(size);
+        umm alloc_size = (1 << alloc_order);
         assert(HEAP_MIN_ORDER <= alloc_order && alloc_order <= HEAP_MAX_ORDER);
-        heap->in_used += (1 << alloc_order);
+        heap->in_used += alloc_size;
         
         s32 order = alloc_order;
         while(order <= HEAP_MAX_ORDER)
@@ -316,7 +313,7 @@ heap_alloc(Heap *heap, umm size)
         if(order > HEAP_MAX_ORDER)
         {
             // NOTE: out of memory
-            assert(0);
+            invalid_code_path;
         }
         
         while(order > alloc_order)
@@ -345,7 +342,6 @@ heap_alloc(Heap *heap, umm size)
 static void
 heap_free(Heap *heap, void *ptr)
 {
-    return;
     HeapBlock *block = (HeapBlock *)ptr;
     s32 order = HEAP_MIN_ORDER;
     while(order <= HEAP_MAX_ORDER)
@@ -376,17 +372,21 @@ heap_free(Heap *heap, void *ptr)
 }
 
 static void
-heap_init(Heap *heap, void *addr, umm size)
+heap_init(Heap *heap, void *begin, void *end)
 {
-    heap->memory = addr;
+    begin = (void *)align_up((u64)begin, 16);
+    end = (void *)align_down((u64)end, 16);
     
-    size = align2_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
-    addr = (void *)align2_up((umm)addr, 16);
+    void *addr = begin;
+    umm size = align_down(end - begin, HEAP_MAX_ALLOCATION);
     
     clear_memory(heap, sizeof(*heap));
     u64 max_block_count = size / HEAP_MIN_ALLOCATION;
     u64 max_served_count = max_block_count << 1;
-    u64 served_size = align2_up(max_served_count, 8 * HEAP_MIN_ALLOCATION) / 8;
+    
+    assert(HEAP_MIN_ALLOCATION <= 64);
+    u64 served_size = align_up(max_served_count, 64) >> 3;
+    assert(served_size < size);
     
     heap->total = size;
     heap->served_mask = max_served_count - 1;
@@ -398,31 +398,40 @@ heap_init(Heap *heap, void *addr, umm size)
     for(s32 order = HEAP_MIN_ORDER; order <= HEAP_MAX_ORDER; ++order)
         double_link_init(&heap->free_block[order]);
     
-    s32 order = get_most_significant_bit_position(served_size);
-    umm block_size = 1 << order;
-    u8 *cur = (u8 *)addr + block_size;
-    umm remaining_size = size - block_size;
-    while(order < HEAP_MAX_ORDER)
+    u8 *cur = (u8 *)addr + size - HEAP_MAX_ALLOCATION;
+    u8 *served_end = (u8 *)addr + served_size;
+    while(served_end < cur)
     {
-        block_size = 1 << order;
-        if(remaining_size < block_size)
+        HeapBlock *block = (HeapBlock *)cur;
+        double_link_insert_at_last(&heap->free_block[HEAP_MAX_ORDER], block);
+        cur -= HEAP_MAX_ALLOCATION;
+    }
+    
+    for(s32 order = HEAP_MAX_ORDER; order > HEAP_MIN_ORDER; --order)
+    {
+        if(cur == served_end)
+        {
+            HeapBlock *block = (HeapBlock *)cur;
+            double_link_insert_at_last(&heap->free_block[order], block);
             break;
-        double_link_insert_at_last(&heap->free_block[order], (HeapBlock *)cur);
+        }
+        
         heap_mark_served(heap, order, cur);
-        cur += block_size;
-        remaining_size -= block_size;
-        ++order;
+        
+        --order;
+        um32 split_size = 1 << order;
+        HeapBlock *block0 = (HeapBlock *)((u8 *)cur);
+        HeapBlock *block1 = (HeapBlock *)((u8 *)cur + split_size);
+        if(served_end < (u8 *)block1)
+        {
+            double_link_insert_at_last(&heap->free_block[order], block1);
+        }
+        else
+        {
+            heap_mark_served(heap, order, block0);
+            cur = (u8 *)block1;
+        }
     }
-    
-    while(remaining_size >= HEAP_MAX_ALLOCATION)
-    {
-        double_link_insert_at_last(&heap->free_block[HEAP_MAX_ORDER], (HeapBlock *)cur);
-        heap_mark_served(heap, HEAP_MAX_ORDER, cur);
-        cur += HEAP_MAX_ALLOCATION;
-        remaining_size -= HEAP_MAX_ALLOCATION;
-    }
-    
-    assert(remaining_size == 0);
 }
 
 static
@@ -536,12 +545,12 @@ kernel_main(void *devicetree_addr)
     init_kernel_state(&g_kernel_state);
     
     Heap heap;
-    heap_init(&heap, &heap_begin, (umm)&heap_size);
+    heap_init(&heap, &heap_begin, &heap_end);
     
     // devicetree_traverse(devicetree_addr, print_devicetree, 0);
     devicetree_traverse(devicetree_addr, match_and_init_cpio, &g_cpio_base);
     
-    add_timer(0, timer_tell_time, 0);
+    // add_timer(0, timer_tell_time, 0);
     print_string("Hello, Sailor!\r\n");
     for(;;)
     {

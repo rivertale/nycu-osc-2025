@@ -2,11 +2,11 @@
 #define KERNEL_H
 
 #include "common.h"
-#include "devicetree.h"
-#include "watchdog.h"
+#include "kernel_cpio.h"
+#include "kernel_devicetree.h"
+#include "kernel_mailbox.h"
+#include "kernel_watchdog.h"
 #include "uart.h"
-#include "mailbox.h"
-#include "cpio.h"
 
 #define IRQ_AUX_INT (1 << 29)
 #define IRQ_PENDING_1 0x3f00b204
@@ -23,7 +23,7 @@
 #define USER_SPACE_BEGIN 0x800000
 #define USER_SPACE_END 0xb00000
 extern void *heap_begin;
-extern void *heap_size;
+extern void *heap_end;
 
 #define double_link_insert_at_last(sentinel, link) \
 do \
@@ -65,8 +65,6 @@ typedef struct Heap
     u8 *base;
     u64 *served;
     HeapBlock free_block[HEAP_MAX_ORDER + 1];
-    u8 *memory;
-    umm memory_used;
 } Heap;
 
 #define KERNEL_MAX_IO_BUFFER_SIZE 4096

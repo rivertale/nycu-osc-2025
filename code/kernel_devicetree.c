@@ -34,7 +34,7 @@ devicetree_traverse(void *devicetree_addr, DevicetreeCallback *callback, void *u
             path_len += name_len + 1;
             ++dir_depth;
             
-            cur += align2_up(name_len + 1, 4);
+            cur += align_up(name_len + 1, 4);
         }
         else if(tag == FDT_END_NODE)
         {
@@ -54,7 +54,7 @@ devicetree_traverse(void *devicetree_addr, DevicetreeCallback *callback, void *u
             
             callback(path, prop_name, prop, prop_size, userdata);
             
-            cur += sizeof(u32) * 2 + align2_up(prop_size, 4);
+            cur += sizeof(u32) * 2 + align_up(prop_size, 4);
         }
         else if(tag == FDT_NOP)
         {

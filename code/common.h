@@ -19,10 +19,22 @@ typedef u64 umm;
 typedef volatile u32 vu32;
 
 
-#define do_nothing
+#define do_nothing (void)0
 #define array_count(array) (sizeof(array) / sizeof(array[0]))
-#define assert(condition) if(!(condition)) __asm__ volatile ("brk #0")
 #define wait_cycle(delay) for(u32 i = 0; i < delay; ++i) __asm__ volatile("nop")
+#define invalid_code_path assert(0)
+#define assert(condition) assert_1(condition, __FILE__, __LINE__)
+#define assert_1(condition, file, line) assert_2(condition, file, line)
+#define assert_2(condition, file, line) assert_3(condition, file, #line)
+#define assert_3(condition, file, line) \
+do \
+{ \
+    if(!(condition)) \
+    { \
+        mini_uart_write_const(file "(" line "): assert failed"); \
+        __asm__ volatile ("brk #0"); \
+    } \
+} while(0)
 
 static u64
 next_power_of_two(u64 value)
@@ -38,7 +50,14 @@ next_power_of_two(u64 value)
 }
 
 static u64
-align2_up(u64 value, s32 alignment)
+align_down(u64 value, u64 alignment)
+{
+    u64 mask = alignment - 1;
+    return value & ~mask;
+}
+
+static u64
+align_up(u64 value, u64 alignment)
 {
     u64 mask = alignment - 1;
     return (value + mask) & ~mask;

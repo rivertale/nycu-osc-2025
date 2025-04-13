@@ -38,7 +38,6 @@ exception_handler_el1_cur_sync(void)
                      "mrs %2, esr_el1\n"
                      : "=r"(spsr_el1), "=r"(elr_el1), "=r"(esr_el1));
     
-    print_string("QQ\r\n");
     print_string("spsr_el1=");
     print_hex64(spsr_el1);
     print_string("\r\n");

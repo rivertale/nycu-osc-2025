@@ -1,4 +1,4 @@
-.globl _start
+.global _start
 
 .section ".text.reloc"
 _start:

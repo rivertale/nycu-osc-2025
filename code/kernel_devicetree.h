@@ -1,5 +1,5 @@
-#ifndef DEVICETREE_H
-#define DEVICETREE_H
+#ifndef KERNEL_DEVICETREE_H
+#define KERNEL_DEVICETREE_H
 
 #define FDT_BEGIN_NODE 0x00000001
 #define FDT_END_NODE 0x00000002
@@ -28,4 +28,4 @@ typedef struct FdtHeader
     u32 size_dt_struct;
 } FdtHeader;
 
-#endif //DEVICETREE_H
+#endif //KERNEL_DEVICETREE_H
