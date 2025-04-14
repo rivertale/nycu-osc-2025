@@ -6,7 +6,7 @@ mini_uart_read_byte(void)
 {
     while(!(*(vu32 *)AUX_MU_LSR_REG & 0x1))
         do_nothing;
-    
+
     u8 result = *(vu32 *)AUX_MU_IO_REG;
     return result;
 }
@@ -16,7 +16,7 @@ mini_uart_write_byte(u8 byte)
 {
     while(!(*(vu32 *)AUX_MU_LSR_REG & 0x20))
         do_nothing;
-    
+
     *(vu32 *)AUX_MU_IO_REG = byte;
 }
 
@@ -40,7 +40,7 @@ static void
 mini_uart_write_u64(u64 value)
 {
     c8 digits[32];
-    
+
     um32 cur = array_count(digits);
     if(value > 0)
     {
@@ -54,34 +54,33 @@ mini_uart_write_u64(u64 value)
     {
         digits[--cur] = '0';
     }
-    
+
     for(c8 *c = digits + cur; *c; ++c)
         mini_uart_write_byte(*c);
 }
 
-
 static void
-mini_uart_enable_read_exception(void)
+mini_uart_enable_read_interrupt(void)
 {
-    *(vu32 *)AUX_MU_IER_REG |= 1;
+    *(vu32 *)AUX_MU_IER_REG |= AUX_MU_IER_RECEIVE_ENABLED;
 }
 
 static void
-mini_uart_disable_read_exception(void)
+mini_uart_disable_read_interrupt(void)
 {
-    *(vu32 *)AUX_MU_IER_REG &= ~1;
+    *(vu32 *)AUX_MU_IER_REG &= ~AUX_MU_IER_RECEIVE_ENABLED;
 }
 
 static void
-mini_uart_enable_write_exception(void)
+mini_uart_enable_write_interrupt(void)
 {
-    *(vu32 *)AUX_MU_IER_REG |= 2;
+    *(vu32 *)AUX_MU_IER_REG |= AUX_MU_IER_TRANSMIT_ENABLED;
 }
 
 static void
-mini_uart_disable_write_exception(void)
+mini_uart_disable_write_interrupt(void)
 {
-    *(vu32 *)AUX_MU_IER_REG &= ~2;
+    *(vu32 *)AUX_MU_IER_REG &= ~AUX_MU_IER_TRANSMIT_ENABLED;
 }
 
 static void
@@ -89,20 +88,20 @@ mini_uart_init(void)
 {
     *(vu32 *)GPFSEL1 &= ~((GPFSEL_ALT_MASK << 12) | (GPFSEL_ALT_MASK << 15));
     *(vu32 *)GPFSEL1 |= (GPFSEL_ALT5 << 12) | (GPFSEL_ALT5 << 15);
-    
+
     *(vu32 *)GPPUD = 0;
     wait_cycle(150);
     *(vu32 *)GPPUDCLK0 = (1 << 14) | (1 << 15);
     wait_cycle(150);
     *(vu32 *)GPPUD = 0;
     *(vu32 *)GPPUDCLK0 = 0;
-    
-    *(vu32 *)AUX_ENABLES = 1;
+
+    *(vu32 *)AUX_ENABLES = AUX_ENABLES_MINI_UART;
     *(vu32 *)AUX_MU_CNTL_REG = 0;
     *(vu32 *)AUX_MU_IER_REG = 0;
     *(vu32 *)AUX_MU_LCR_REG = 3;
     *(vu32 *)AUX_MU_MCR_REG = 0;
     *(vu32 *)AUX_MU_BAUD_REG = 270;
-    *(vu32 *)AUX_MU_IIR_REG = 6;
+    *(vu32 *)AUX_MU_IIR_REG = AUX_MU_IIR_TRANSMIT | AUX_MU_IIR_RECEIVE;
     *(vu32 *)AUX_MU_CNTL_REG = 3;
 }

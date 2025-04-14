@@ -47,19 +47,19 @@ static b32
 add_timer(u64 expiration, KernelTimerCallback *callback, void *userdata)
 {
     b32 result = 0;
-    
+
     KernelState *state = &g_kernel_state;
     if(state->first_free_timer)
     {
         result = 1;
-        
+
         u32 index = state->first_free_timer;
         Timer *timer = state->timers + index;
         state->first_free_timer = timer->next_free;
         timer->tick = get_timer_current_tick() + expiration;
         timer->callback = callback;
         timer->userdata = userdata;
-        
+
         u32 *index_ptr = &state->first_expired_timer;
         while(*index_ptr)
         {
@@ -70,14 +70,14 @@ add_timer(u64 expiration, KernelTimerCallback *callback, void *userdata)
         }
         timer->next_expired = *index_ptr;
         *index_ptr = index;
-        
+
         if(state->first_expired_timer == index)
         {
             set_timer_expiration(timer->tick);
             enable_timer();
         }
-        
+
     }
-    
+
     return result;
 }

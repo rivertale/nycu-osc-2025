@@ -16,16 +16,16 @@ main(int arg_count, char **args)
         printf("usage: cal <value>\n");
         return 0;
     }
-    
+
     char *input = args[1];
-    
+
     int mode = 10;
     if(input[0] == '0' && input[1] == 'x')
     {
         mode = 16;
         input += 2;
     }
-    
+
     long long value = 0;
     switch(mode)
     {
@@ -34,7 +34,7 @@ main(int arg_count, char **args)
             for(char *c = input; *c; ++c)
             {
                 if('0' <= *c && *c <= '9')
-                    value = value * 10 + (*c - '0'); 
+                    value = value * 10 + (*c - '0');
                 else
                     fatal_error("invalid digit");
             }
@@ -56,7 +56,7 @@ main(int arg_count, char **args)
             }
         } break;
     }
-    
+
     printf("[value]\n");
     printf("signed = %lld\n", value);
     printf("unsigned = %llu\n", value);

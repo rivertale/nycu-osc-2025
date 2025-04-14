@@ -1,4 +1,4 @@
-#include "kernel_exception.S"
+#include "kernel_interrupt.S"
 
 .section ".text.boot"
 .globl _start
@@ -24,7 +24,7 @@ clear_bss_loop:
     sub x1, x1, #8
     b clear_bss_loop
 clear_bss_done:
-    adr x0, exception_vector_table
+    adr x0, interrupt_vector_table
     msr vbar_el1, x0
 
     // restore devicetree addr

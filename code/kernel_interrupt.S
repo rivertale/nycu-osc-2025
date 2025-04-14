@@ -46,75 +46,70 @@
 
 .section ".text"
 .align 11
-.global exception_vector_table
-exception_vector_table:
-    b exception_entry_default
+.global interrupt_vector_table
+interrupt_vector_table:
+    b interrupt_entry_default
     .align 7
-    b exception_entry_default
+    b interrupt_entry_default
     .align 7
-    b exception_entry_default
+    b interrupt_entry_default
     .align 7
-    b exception_entry_default
-    .align 7
-
-    b exception_entry_el1_cur_sync
-    .align 7
-    b exception_entry_el1_cur_irq
-    .align 7
-    b exception_entry_default
-    .align 7
-    b exception_entry_default
+    b interrupt_entry_default
     .align 7
 
-    b exception_entry_el1_low_sync
+    b interrupt_entry_el1_cur_sync
     .align 7
-    b exception_entry_el1_low_irq
+    b interrupt_entry_el1_cur_irq
     .align 7
-    b exception_entry_default
+    b interrupt_entry_default
     .align 7
-    b exception_entry_default
-    .align 7
-
-    b exception_entry_default
-    .align 7
-    b exception_entry_default
-    .align 7
-    b exception_entry_default
-    .align 7
-    b exception_entry_default
+    b interrupt_entry_default
     .align 7
 
-exception_entry_el1_cur_sync:
-    msr DAIFSet, 0xf
+    b interrupt_entry_el1_low_sync
+    .align 7
+    b interrupt_entry_el1_low_irq
+    .align 7
+    b interrupt_entry_default
+    .align 7
+    b interrupt_entry_default
+    .align 7
+
+    b interrupt_entry_default
+    .align 7
+    b interrupt_entry_default
+    .align 7
+    b interrupt_entry_default
+    .align 7
+    b interrupt_entry_default
+    .align 7
+
+interrupt_entry_el1_cur_sync:
     save_registers_to_stack
-    bl exception_handler_el1_cur_sync
+    bl interrupt_handler_el1_cur_sync
     load_registers_from_stack
     eret
 
-exception_entry_el1_cur_irq:
-    msr DAIFSet, 0xf
+interrupt_entry_el1_cur_irq:
     save_registers_to_stack
-    bl exception_handler_el1_cur_irq
+    bl interrupt_handler_el1_cur_irq
     load_registers_from_stack
     eret
 
-exception_entry_el1_low_sync:
-    msr DAIFSet, 0xf
+interrupt_entry_el1_low_sync:
     save_registers_to_stack
-    bl exception_handler_el1_low_sync
+    bl interrupt_handler_el1_low_sync
     load_registers_from_stack
     eret
 
-exception_entry_el1_low_irq:
-    msr DAIFSet, 0xf
+interrupt_entry_el1_low_irq:
     save_registers_to_stack
-    bl exception_handler_el1_low_irq
+    bl interrupt_handler_el1_low_irq
     load_registers_from_stack
     eret
 
-exception_entry_default:
-    msr DAIFSet, 0xf
+interrupt_entry_default:
     save_registers_to_stack
-    bl exception_handler_default
+    bl interrupt_handler_default
     load_registers_from_stack
     eret

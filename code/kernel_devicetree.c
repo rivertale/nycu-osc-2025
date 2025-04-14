@@ -3,20 +3,28 @@ mini_uart_write(array, (array_count(array) - 1) * sizeof(array[0]))
 static void mini_uart_write_byte(u8 byte);
 static void mini_uart_write(void *buffer, umm size);
 
-static void
+static u32
+devicetree_get_total_size(void *devicetree_addr)
+{
+    FdtHeader *header = (FdtHeader *)devicetree_addr;
+    return devicetree_u32(&header->totalsize);
+}
+
+static u32
 devicetree_traverse(void *devicetree_addr, DevicetreeCallback *callback, void *userdata)
 {
+    b32 result = 0;
     FdtHeader *header = (FdtHeader *)devicetree_addr;
     if(devicetree_u32(&header->magic) == 0xd00dfeed)
         do_nothing; // TODO: check magic
-    
+
     u32 dir_depth = 0;
     u32 path_len = 0;
     c8 path[DEVICETREE_MAX_PATH_LEN];
-    
+
     c8 *strings_block = (c8 *)header + devicetree_u32(&header->off_dt_strings);
     u8 *structure_block = (u8 *)header + devicetree_u32(&header->off_dt_struct);
-    
+
     u8 *cur = (u8 *)structure_block;
     for(;;)
     {
@@ -27,13 +35,13 @@ devicetree_traverse(void *devicetree_addr, DevicetreeCallback *callback, void *u
             c8 *name = (c8 *)cur;
             um32 name_len = string_len(name);
             assert(path_len + name_len + 1 < DEVICETREE_MAX_PATH_LEN);
-            
+
             copy_memory(path + path_len, name, name_len);
             path[path_len + name_len] = '/';
             path[path_len + name_len + 1] = '\0';
             path_len += name_len + 1;
             ++dir_depth;
-            
+
             cur += align_up(name_len + 1, 4);
         }
         else if(tag == FDT_END_NODE)
@@ -51,9 +59,9 @@ devicetree_traverse(void *devicetree_addr, DevicetreeCallback *callback, void *u
             c8 *prop_name = strings_block + name_offset;
             u32 prop_size = devicetree_u32(cur);
             u8 *prop = cur + sizeof(u32) * 2;
-            
-            callback(path, prop_name, prop, prop_size, userdata);
-            
+
+            result += (callback(path, prop_name, prop, prop_size, userdata) != 0);
+
             cur += sizeof(u32) * 2 + align_up(prop_size, 4);
         }
         else if(tag == FDT_NOP)
@@ -66,4 +74,5 @@ devicetree_traverse(void *devicetree_addr, DevicetreeCallback *callback, void *u
             break;
         }
     }
+    return result;
 }

@@ -12,17 +12,17 @@ push_size(BootArena *arena, umm size)
 }
 
 static BootArena *
-bootstrap_boot_arena(void *memory, umm size)
+bootstrap_boot_arena(void *low, void *high)
 {
     BootArena *arena = 0;
-    assert(memory != 0);
-    
-    u8 *low = (u8 *)align_up((u64)memory, 16);
-    u8 *high = (u8 *)align_down((u64)memory + size, 16);
+    assert(low != 0);
+
+    low = (void *)align_up((u64)low, 16);
+    high = (void *)align_down((u64)high, 16);
     um32 bootstrap_size = align_up(sizeof(*arena), 16);
-    
-    memory = low;
-    size = high - low;
+
+    u8 *memory = (u8 *)low;
+    umm size = (u8 *)high - (u8 *)low;
     if(size >= bootstrap_size)
     {
         arena = (BootArena *)memory;
@@ -36,6 +36,8 @@ bootstrap_boot_arena(void *memory, umm size)
 static void
 reserve_memory_region(MemoryRegionList *list, void *low, void *high)
 {
+    assert(low <= high);
+
     u32 cur = 0;
     for(u32 index = 0; index < list->count; ++index)
     {
@@ -60,7 +62,7 @@ reserve_memory_region(MemoryRegionList *list, void *low, void *high)
                 assert(list->count < MAX_MEMORY_REGION_COUNT);
                 for(u32 i = list->count - 1; i > index; --i)
                     list->regions[i + 1] = list->regions[i];
-                
+
                 void *low0 = region[0].low;
                 void *high0 = low;
                 void *low1 = high;
@@ -82,7 +84,7 @@ reserve_memory_region(MemoryRegionList *list, void *low, void *high)
             }
             else
             {
-                
+
                 list->regions[cur].low = high;
                 list->regions[cur].high = region->high;
                 ++cur;
@@ -95,7 +97,7 @@ reserve_memory_region(MemoryRegionList *list, void *low, void *high)
             ++cur;
         }
     }
-    
+
     list->count = cur;
 }
 
@@ -103,9 +105,9 @@ static void
 init_memory_region_list(MemoryRegionList *list, void *low, void *high)
 {
     assert(low <= high);
-    
+
     list->count = 0;
-    
+
     assert(list->count < MAX_MEMORY_REGION_COUNT);
     MemoryRegion *region = list->regions + list->count++;
     region->low = low;
@@ -126,11 +128,11 @@ page_pool_get_reservation_bit_index(PagePool *pool, s32 order, void *block)
     // 000000000 - 011111111 (order 0)
     // 100000000 - 101111111 (order 1)
     // 110000000 - 110111111 (order 2)
-    
+
     u64 mask = (1ull << (pool->next_exponent_after_max_page + 1)) - 1;
     u64 block_index = ((u8 *)block - pool->base) >> (PAGE_MIN_ALLOC_EXPONENT + order);
     u64 order_bits = (-1ull << (pool->next_exponent_after_max_page - order)) & mask;
-    
+
     assert((order_bits & block_index) == 0);
     return order_bits | block_index;
 }
@@ -161,9 +163,9 @@ free_pages(PagePool *pool, void *ptr)
 {
     if(!ptr)
         return;
-    
+
     PageBlock *block = (PageBlock *)ptr;
-    
+
     s32 order = 0;
     while(order <= PAGE_MAX_ALLOC_ORDER)
     {
@@ -171,23 +173,23 @@ free_pages(PagePool *pool, void *ptr)
             break;
         ++order;
     }
-    
+
     if(order <= PAGE_MAX_ALLOC_ORDER)
     {
         // NOTE: we are not sure if we are freeing valid memory
         page_pool_unmark_reserved(pool, order, block);
-        
+
         while(order < PAGE_MAX_ALLOC_ORDER)
         {
             s32 exponent = PAGE_MIN_ALLOC_EXPONENT + order;
-            
+
             PageBlock *buddy = (PageBlock *)((u64)block ^ (1 << exponent));
             if(page_pool_is_reserved(pool, order, buddy))
                 break;
-            
+
             page_pool_unmark_reserved(pool, order, block);
             double_link_remove(buddy);
-            
+
             block = (PageBlock *)((u64)block & ~(1 << exponent));
             ++order;
         }
@@ -208,7 +210,7 @@ alloc_pages(PagePool *pool, umm size)
         if(size < PAGE_MIN_ALLOC_SIZE)
             size = PAGE_MIN_ALLOC_SIZE;
         size = next_power_of_two(size);
-        
+
         s32 order = find_most_significant_bit(size) - PAGE_MIN_ALLOC_EXPONENT;
         s32 split_order = order;
         while(split_order <= PAGE_MAX_ALLOC_ORDER)
@@ -217,7 +219,7 @@ alloc_pages(PagePool *pool, umm size)
                 break;
             ++split_order;
         }
-        
+
         if(split_order < PAGE_MAX_ALLOC_ORDER)
         {
             // NOTE: split the block until it fits the allocation size
@@ -226,20 +228,20 @@ alloc_pages(PagePool *pool, umm size)
                 PageBlock *block = pool->free_block[split_order].next;
                 double_link_remove(block);
                 page_pool_mark_reserved(pool, split_order, block);
-                
+
                 --split_order;
                 um32 split_size = 1 << (PAGE_MIN_ALLOC_EXPONENT + split_order);
-                
+
                 PageBlock *low_block = (PageBlock *)((u8 *)block);
                 PageBlock *high_block = (PageBlock *)((u8 *)block + split_size);
                 double_link_insert_at_last(&pool->free_block[split_order], low_block);
                 double_link_insert_at_last(&pool->free_block[split_order], high_block);
             }
-            
+
             result = (void *)pool->free_block[split_order].next;
             double_link_remove((PageBlock *)result);
             page_pool_mark_reserved(pool, order, result);
-            
+
             clear_memory(result, size);
         }
         else
@@ -258,27 +260,27 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
     {
         double_link_init(&pool->free_block[order]);
     }
-    
+
     if(region_list->count == 0)
         return;
-    
+
     MemoryRegion *first_region = region_list->regions;
     MemoryRegion *last_region = region_list->regions + region_list->count - 1;
     u64 reservation_lowest = align_down((u64)first_region->low, PAGE_MAX_ALLOC_SIZE);
     u64 reservation_highest = align_up((u64)last_region->high, PAGE_MAX_ALLOC_SIZE);
-    
+
     u64 max_page_count = (reservation_highest - reservation_lowest) >> PAGE_MIN_ALLOC_EXPONENT;
     u64 max_reservation_count = max_page_count << 1;
-    
+
     u64 page_info_size = max_page_count * sizeof(PageInfo);
     u64 reservation_size = align_up(max_reservation_count, 64) >> 3;
-    
+
     pool->base = (u8 *)reservation_lowest;
-    
+
     // NOTE: reserve byte 0
     if(first_region->low == 0)
         first_region->low = (void *)1;
-    
+
     // NOTE: reserve memory for page info array
     for(s32 index = 0; index < region_list->count; ++index)
     {
@@ -291,7 +293,7 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
         }
     }
     clear_memory(pool->page_infos, page_info_size);
-    
+
     // NOTE: reserve memory for reservation bit array
     for(s32 index = 0; index < region_list->count; ++index)
     {
@@ -304,24 +306,24 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
         }
     }
     clear_memory(pool->reservation, reservation_size);
-    
-    
+
+
     for(s32 index = 0; index < region_list->count; ++index)
     {
         MemoryRegion *region = region_list->regions + index;
-        
+
         u8 *low = (u8 *)align_up((u64)region->low, PAGE_MIN_ALLOC_SIZE);
         u8 *high = (u8 *)align_down((u64)region->high, PAGE_MIN_ALLOC_SIZE);
         s32 low_order = find_least_significant_bit((u64)low) - PAGE_MIN_ALLOC_EXPONENT;
         s32 high_order = find_least_significant_bit((u64)high) - PAGE_MIN_ALLOC_EXPONENT;
-        
+
         assert(low_order >= 0 && high_order >= 0);
         while(low < high)
         {
             if(low_order <= high_order)
             {
                 u32 block_size = 1 << (low_order + PAGE_MIN_ALLOC_EXPONENT);
-                
+
                 PageBlock *block = (PageBlock *)low;
                 double_link_insert_at_last(&pool->free_block[low_order], block);
                 low += block_size;
@@ -330,7 +332,7 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
             else
             {
                 u32 block_size = 1 << (high_order + PAGE_MIN_ALLOC_EXPONENT);
-                
+
                 PageBlock *block = (PageBlock *)(high - block_size);
                 double_link_insert_at_last(&pool->free_block[high_order], block);
                 high -= block_size;
@@ -338,7 +340,7 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
             }
         }
     }
-    
+
     for(s32 order = 0; order < PAGE_MAX_ALLOC_ORDER; ++order)
     {
         for(PageBlock *block = pool->free_block[order].next;
@@ -350,7 +352,7 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
             page_pool_mark_reserved(pool, order, buddy);
         }
     }
-    
+
     u32 region_index = 0;
     MemoryRegion *region = region_list->regions;
     MemoryRegion *sentinel = region_list->regions + region_list->count;
@@ -359,7 +361,7 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
     {
         if(region == sentinel)
             break;
-        
+
         if(block + PAGE_MAX_ALLOC_SIZE <= (u64)region->low)
         {
             page_pool_mark_reserved(pool, PAGE_MAX_ALLOC_ORDER, (void *)block);
@@ -370,7 +372,7 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
             ++region;
         }
     }
-    
+
     void *region_list_ptr = (void *)align_down((u64)region_list, PAGE_MIN_ALLOC_SIZE);
     free_pages(pool, region_list_ptr);
 }
@@ -384,7 +386,7 @@ create_slab(MemoryAllocator *allocator, s32 cache_index, umm allocation_size)
         // TODO: handle error
         u8 *memory = alloc_pages(page_pool, PAGE_SIZE);
         assert(memory);
-        
+
         for(um32 offset = 0; offset + sizeof(Slab) <= PAGE_SIZE; offset += sizeof(Slab))
         {
             Slab *slab = (Slab *)(memory + offset);
@@ -392,30 +394,30 @@ create_slab(MemoryAllocator *allocator, s32 cache_index, umm allocation_size)
             allocator->first_free_slab = slab;
         }
     }
-    
+
     assert(allocator->first_free_slab);
     Slab *slab = allocator->first_free_slab;
     allocator->first_free_slab = slab->next_free;
-    
+
     clear_memory(slab, sizeof(*slab));
-    
+
     // TODO: handle error
     slab->memory = alloc_pages(page_pool, PAGE_SIZE);
     slab->cache_index = cache_index;
     slab->allocation_count = 0;
     slab->max_allocation_count = PAGE_SIZE / allocation_size;
     assert(slab->memory);
-    
+
     PageInfo *page_info = get_page_info(page_pool, slab->memory);
     page_info->slab = slab;
-    
+
     for(um32 offset = 0; offset + allocation_size <= PAGE_SIZE; offset += allocation_size)
     {
         SlabAllocation *allocation = (SlabAllocation *)(slab->memory + offset);
         allocation->next_free = slab->first_free_allocation;
         slab->first_free_allocation = allocation;
     }
-    
+
     return slab;
 }
 
@@ -424,22 +426,22 @@ free_memory(MemoryAllocator *allocator, void *ptr)
 {
     if(!ptr)
         return;
-    
+
     PagePool *page_pool = allocator->page_pool;
     u8 *page_boundary = (u8 *)align_down((u64)ptr, PAGE_SIZE);
     PageInfo *page_info = get_page_info(page_pool, page_boundary);
-    
+
     Slab *slab = page_info->slab;
     if(slab)
     {
         assert(slab->allocation_count > 0);
-        
+
         --slab->allocation_count;
         if(slab->allocation_count == 0)
         {
             page_info->slab = 0;
             free_pages(page_pool, slab->memory);
-            
+
             double_link_remove(&slab->link);
             slab->next_free = allocator->first_free_slab;
             allocator->first_free_slab = slab;
@@ -482,24 +484,24 @@ alloc_memory(MemoryAllocator *allocator, umm size)
                 size = next_power_of_two(size);
                 cache_index = find_most_significant_bit(size);
             }
-            
+
             if(double_link_is_empty(&allocator->partial_cache[cache_index]))
                 create_slab(allocator, cache_index, size);
-            
+
             Slab *slab = (Slab *)allocator->partial_cache[cache_index].next;
             assert(slab);
-            
+
             result = (void *)slab->first_free_allocation;
             slab->first_free_allocation = ((SlabAllocation *)result)->next_free;
             assert(result);
-            
+
             ++slab->allocation_count;
             if(slab->allocation_count == slab->max_allocation_count)
             {
                 double_link_remove(&slab->link);
                 double_link_insert_at_last(&allocator->full_cache[cache_index], &slab->link);
             }
-            
+
             clear_memory(result, size);
         }
         else

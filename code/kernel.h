@@ -2,6 +2,7 @@
 #define KERNEL_H
 
 #include "common.h"
+#include "peripheral.h"
 #include "kernel_cpio.h"
 #include "kernel_devicetree.h"
 #include "kernel_mailbox.h"
@@ -9,9 +10,6 @@
 #include "kernel_watchdog.h"
 #include "uart.h"
 
-#define IRQ_AUX_INT (1 << 29)
-#define IRQ_PENDING_1 0x3f00b204
-#define IRQ_ENABLED_1 0x3f00b210
 #define CORE0_TIMER_IRQ_CTRL 0x40000040
 
 #define HEAP_MIN_ORDER 4 // 16 byte allocation - at least hold a HeapFreeLink
@@ -114,18 +112,26 @@ typedef struct KernelState
     u32 read_cur1;
     u32 write_cur0;
     u32 write_cur1;
-    
+
     u32 first_free_timer;
     u32 first_expired_timer;
-    
+
     u32 first_free_interrupt;
     u32 first_prioritized_interrupt;
-    
+
+    void *devicetree_begin;
+    void *devicetree_end;
+    union { void *cpio_begin; void *first_device_addr; };
+    union { void *cpio_end; void *last_device_addr; };
+
     u8 read_buffer[KERNEL_MAX_IO_BUFFER_SIZE];
     u8 write_buffer[KERNEL_MAX_IO_BUFFER_SIZE];
     Timer timers[KERNEL_MAX_TIMER];
     InterruptContext interrupts[KERNEL_MAX_INTERRUPT];
 } KernelState;
+
+extern void *kernel_image_begin;
+extern void *kernel_image_end;
 
 static KernelState g_kernel_state = {0};
 

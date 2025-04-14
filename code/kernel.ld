@@ -1,6 +1,8 @@
 SECTIONS
 {
     . = 0x80000;
+    kernel_image_begin = .;
+
     .text.boot : { KEEP(*(.text.boot)) }
     .text : { *(.text) }
     .rodata : { *(.rodata) *(.rodata.*) }
@@ -22,5 +24,7 @@ SECTIONS
     stack_begin = .;
     stack_end = 0x300000;
 
+    kernel_image_end = .;
+    kernel_image_size = kernel_image_end - kernel_image_begin;
     _end = .;
 }

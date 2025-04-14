@@ -13,7 +13,7 @@ static b32
 load_kernel(void *addr)
 {
     b32 success = 0;
-    
+
     u32 magic = 0;
     mini_uart_read(&magic, sizeof(magic));
     if(magic == KERNEL_MAGIC)

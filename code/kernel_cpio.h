@@ -20,7 +20,7 @@ typedef struct CpioNewcHeader
     c8 rdevminor[8];
     c8 namesize[8]; // including null-terminator
     c8 check[8];
-    
+
     // c8[] null-terminated filename
     // pad to 2-byte boundary
     // u8[] file content

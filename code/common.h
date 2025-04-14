@@ -18,7 +18,6 @@ typedef u64 umm;
 
 typedef volatile u32 vu32;
 
-
 #define do_nothing (void)0
 #define array_count(array) (sizeof(array) / sizeof(array[0]))
 #define wait_cycle(delay) for(u32 i = 0; i < delay; ++i) __asm__ volatile("nop")
@@ -28,15 +27,20 @@ typedef volatile u32 vu32;
 
 #define debug_log(log) debug_log1(log, __FILE__, __LINE__)
 #define debug_log1(log, file, line) debug_log2(log, file, #line)
-#define debug_log2(log, file, line) mini_uart_write_const("[DEBUG] "file"("line"): "log);
+#define debug_log2(log, file, line) mini_uart_write_const("[DEBUG] " file "(" line "): " log);
 
+#define invalid_code_path assert(0)
 #define assert(condition) assert1(condition, __FILE__, __LINE__)
-#define assert1(condition, file, line) assert2(condition, file, #line)
+#define assert1(condition, file, line) assert2(condition, file, line)
 #define assert2(condition, file, line) \
 do \
 { \
-    mini_uart_write_const(file"("line"): assertion failed\r\n"); \
-    __asm__ volatile ("wfe"); \
+    if(!(condition)) \
+    { \
+        mini_uart_write_const(file "(" #line "): assertion failed\r\n"); \
+        for(;;) \
+            do_nothing; \
+    } \
 } while(0)
 
 static s32

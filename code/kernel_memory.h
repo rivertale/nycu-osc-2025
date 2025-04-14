@@ -30,7 +30,7 @@ typedef struct MemoryRegion
 typedef struct MemoryRegionList
 {
     u32 count;
-    MemoryRegion regions[MAX_MEMORY_REGION_COUNT];
+    __attribute__((aligned(16))) MemoryRegion regions[MAX_MEMORY_REGION_COUNT];
 } MemoryRegionList;
 
 typedef struct BootArena
@@ -56,10 +56,10 @@ typedef struct PagePool
     s32 next_exponent_after_max_page;
     u8 *base;
     u64 *reservation;
-    
+
     u64 max_page;
     PageInfo *page_infos;
-    
+
     PageBlock free_block[PAGE_MAX_ALLOC_ORDER];
 } PagePool;
 

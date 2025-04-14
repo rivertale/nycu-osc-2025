@@ -8,13 +8,13 @@ mailbox_query(u32 *message)
     while(*(vu32 *)MAILBOX_STATUS & MAILBOX_FULL)
         do_nothing;
     *(vu32 *)MAILBOX_WRITE = mailbox;
-    
+
     while(*(vu32 *)MAILBOX_STATUS & MAILBOX_EMPTY)
         do_nothing;
-    
+
     if(*(vu32 *)MAILBOX_READ == mailbox)
         result = (message[1] == MAILBOX_RESPONSE_SUCCESS);
-    
+
     return result;
 }
 
@@ -24,7 +24,7 @@ query_board_revision(void)
     // reference
     // https://jsandler18.github.io/extra/prop-channel.html
     // https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
-    
+
     u32 result = 0;
     __attribute__((aligned(16))) u32 message[7];
     message[0] = sizeof(message);
@@ -34,7 +34,7 @@ query_board_revision(void)
     message[4] = MAILBOX_TAG_REQUEST;
     message[5] = 0; // response buffer
     message[6] = MAILBOX_TAG_END;
-    
+
     if(mailbox_query(message))
         result = message[5];
     return result;
@@ -53,7 +53,7 @@ query_arm_memory_info(void)
     message[5] = 0; // response buffer
     message[6] = 0; // response buffer
     message[7] = MAILBOX_TAG_END;
-    
+
     if(mailbox_query(message))
     {
         result.base = message[5];

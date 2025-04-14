@@ -2,6 +2,7 @@
 #define BOOTLOADER_H
 
 #include "common.h"
+#include "peripheral.h"
 #include "uart.h"
 
 #define BOOTLOADER_STARTUP_ADDR ((void *)0x40000)
@@ -25,7 +26,7 @@ calculate_kernel_checksum(u8 *buffer, um32 size)
         buffer += 4;
         size -= 4;
     }
-    
+
     u32 tail = 0;
     switch(size)
     {

@@ -12,14 +12,14 @@ static void print_hex32(u32 value);
 static void print_hex64(u64 value);
 static void print_u64(u64 value);
 #include "kernel_timer.c"
-#include "kernel_exception.c"
+#include "kernel_interrupt.c"
 
 static void
 read_console(void *buffer, u64 size)
 {
     KernelState *state = &g_kernel_state;
-    mini_uart_enable_read_exception();
-    
+    mini_uart_enable_read_interrupt();
+
     u8 *byte = (u8 *)buffer;
     while(size > 0)
     {
@@ -30,15 +30,15 @@ read_console(void *buffer, u64 size)
             --size;
         }
     }
-    
-    mini_uart_disable_read_exception();
+
+    mini_uart_disable_read_interrupt();
 }
 
 static void
 write_console(void *buffer, u64 size)
 {
     KernelState *state = &g_kernel_state;
-    
+
     u8 *byte = (u8 *)buffer;
     while(size > 0)
     {
@@ -50,8 +50,8 @@ write_console(void *buffer, u64 size)
             next_write_cur1 = (state->write_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
             --size;
         }
-        
-        mini_uart_enable_write_exception();
+
+        mini_uart_enable_write_interrupt();
     }
 }
 
@@ -59,6 +59,12 @@ static void
 print_buffer(c8 *buffer, umm size)
 {
     write_console(buffer, size);
+}
+
+static void
+print_char(c8 c)
+{
+    write_console(&c, 1);
 }
 
 static void
@@ -76,7 +82,7 @@ print_hex32(u32 value)
         '0', '1', '2', '3', '4', '5', '6', '7',
         '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
     };
-    
+
     c8 digits[] =
     {
         '0', 'x',
@@ -101,7 +107,7 @@ print_hex64(u64 value)
         '0', '1', '2', '3', '4', '5', '6', '7',
         '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
     };
-    
+
     c8 digits[] =
     {
         '0', 'x',
@@ -130,7 +136,7 @@ static void
 print_u64(u64 value)
 {
     c8 digits[32];
-    
+
     um32 cur = array_count(digits);
     if(value > 0)
     {
@@ -144,7 +150,7 @@ print_u64(u64 value)
     {
         digits[--cur] = '0';
     }
-    
+
     print_string(digits + cur);
 }
 
@@ -174,7 +180,7 @@ scan_line(c8 *string, um32 max_len)
                 *cur++ = c;
                 --remaining_len;
             }
-            
+
             if(c == '\r')
                 break;
         }
@@ -184,16 +190,26 @@ scan_line(c8 *string, um32 max_len)
 }
 
 static
-DEVICETREE_CALLBACK(match_and_init_cpio)
+DEVICETREE_CALLBACK(init_kernel_addr_range)
 {
     b32 result = 0;
-    if(string_match(path, "/chosen/") &&
-       string_match(prop_name, "linux,initrd-start"))
+
+    KernelState *state = (void *)userdata;
+
+    if(string_match(path, "/chosen/"))
     {
-        result = 1;
-        void **cpio_addr = (void **)userdata;
-        *cpio_addr = (void *)(umm)devicetree_u32(prop);
+        if(string_match(prop_name, "linux,initrd-start"))
+        {
+            result = 1;
+            state->cpio_begin = (void *)(umm)devicetree_u32(prop);
+        }
+        else if(string_match(prop_name, "linux,initrd-end"))
+        {
+            result = 1;
+            state->cpio_end = (void *)(umm)devicetree_u32(prop);
+        }
     }
+
     return result;
 }
 
@@ -204,29 +220,43 @@ DEVICETREE_CALLBACK(print_devicetree)
     print_string(" - ");
     print_string(prop_name);
     print_string("\r\n");
-    print_buffer((c8 *)prop, prop_size);
-    print_string(" { ");
-    
+
     for(um32 index = 0; index < prop_size; ++index)
     {
-        if(index != 0)
-            print_string(", ");
-        
-        c8 hex_digits[16] =
+        c8 c = ((c8 *)prop)[index];
+        if(32 <= c && c <= 126)
         {
-            '0', '1', '2', '3', '4', '5', '6', '7',
-            '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
-        };
-        
-        c8 byte[3] =
+            print_char(c);
+        }
+        else
         {
-            hex_digits[(prop[index] >> 4) & 15],
-            hex_digits[(prop[index] >> 0) & 15],
-            '\0'
-        };
-        print_string(byte);
+            switch(c)
+            {
+                case '\0': { print_string("\\0"); } break;
+                case '\r': { print_string("\\r"); } break;
+                case '\n': { print_string("\\n"); } break;
+                case '\\': { print_string("\\\\"); } break;
+                default:
+                {
+                    static c8 hex_digits[16] =
+                    {
+                        '0', '1', '2', '3', '4', '5', '6', '7',
+                        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+                    };
+
+                    c8 byte[5] =
+                    {
+                        '\\', 'x',
+                        hex_digits[(c >> 4) & 15],
+                        hex_digits[(c >> 0) & 15],
+                        '\0'
+                    };
+                    print_string(byte);
+                } break;
+            }
+        }
     }
-    print_string(" }\r\n");
+    print_string("\r\n");
     return 0;
 }
 
@@ -266,7 +296,7 @@ heap_alloc(Heap *heap, umm size)
     void *result1 = (void *)(heap->memory + heap->memory_used);
     heap->memory_used += size;
     return result1;
-    
+
     return 0;
     void *result = 0;
     if(size > 0)
@@ -274,11 +304,11 @@ heap_alloc(Heap *heap, umm size)
         if(size < HEAP_MIN_ALLOCATION)
             size = HEAP_MIN_ALLOCATION;
         size = next_power_of_two(size);
-        
+
         s32 alloc_order = find_most_significant_bit(size);
         assert(HEAP_MIN_ORDER <= alloc_order && alloc_order <= HEAP_MAX_ORDER);
         heap->in_used += (1 << alloc_order);
-        
+
         s32 order = alloc_order;
         while(order <= HEAP_MAX_ORDER)
         {
@@ -286,29 +316,29 @@ heap_alloc(Heap *heap, umm size)
                 break;
             ++order;
         }
-        
+
         if(order > HEAP_MAX_ORDER)
         {
             // NOTE: out of memory
             assert(0);
         }
-        
+
         while(order > alloc_order)
         {
             HeapBlock *block = heap->free_block[order].next;
             double_link_remove(block);
             heap_mark_served(heap, order, block);
-            
+
             // NOTE: split the block until it fits the allocated size
             --order;
             um32 split_size = 1 << order;
             HeapBlock *block0 = (HeapBlock *)((u8 *)block);
             HeapBlock *block1 = (HeapBlock *)((u8 *)block + split_size);
-            
+
             double_link_insert_at_last(&heap->free_block[order], block0);
             double_link_insert_at_last(&heap->free_block[order], block1);
         }
-        
+
         result = (void *)heap->free_block[alloc_order].next;
         double_link_remove((HeapBlock *)result);
         heap_mark_served(heap, order, result);
@@ -326,23 +356,23 @@ heap_free(Heap *heap, void *ptr)
     {
         if(heap_is_served(heap, order, block))
             break;
-        
+
         ++order;
     }
     assert(order <= HEAP_MAX_ORDER);
     heap_unmark_served(heap, order, block);
     heap->in_used -= (1 << order);
-    
+
     while(order < HEAP_MAX_ORDER)
     {
         umm offset = (u8 *)block - heap->base;
         HeapBlock *buddy = (HeapBlock *)(heap->base + (offset ^ (1 << order)));
         if(heap_is_served(heap, order, buddy))
             break;
-        
+
         heap_unmark_served(heap, order, block);
         double_link_remove(buddy);
-        
+
         block = (HeapBlock *)(heap->base + (offset & ~(1 << order)));
         ++order;
     }
@@ -353,25 +383,25 @@ static void
 heap_init(Heap *heap, void *addr, umm size)
 {
     heap->memory = addr;
-    
+
     size = align_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
     addr = (void *)align_up((umm)addr, 16);
-    
+
     clear_memory(heap, sizeof(*heap));
     u64 max_block_count = size / HEAP_MIN_ALLOCATION;
     u64 max_served_count = max_block_count << 1;
     u64 served_size = align_up(max_served_count, 8 * HEAP_MIN_ALLOCATION) / 8;
-    
+
     heap->total = size;
     heap->served_mask = max_served_count - 1;
     heap->order_shift = find_most_significant_bit(max_block_count) + 1;
     heap->base = addr;
     heap->served = (u64 *)addr;
-    
+
     clear_memory(heap->served, served_size);
     for(s32 order = HEAP_MIN_ORDER; order <= HEAP_MAX_ORDER; ++order)
         double_link_init(&heap->free_block[order]);
-    
+
     s32 order = find_most_significant_bit(served_size);
     umm block_size = 1 << order;
     u8 *cur = (u8 *)addr + block_size;
@@ -387,7 +417,7 @@ heap_init(Heap *heap, void *addr, umm size)
         remaining_size -= block_size;
         ++order;
     }
-    
+
     while(remaining_size >= HEAP_MAX_ALLOCATION)
     {
         double_link_insert_at_last(&heap->free_block[HEAP_MAX_ORDER], (HeapBlock *)cur);
@@ -395,7 +425,7 @@ heap_init(Heap *heap, void *addr, umm size)
         cur += HEAP_MAX_ALLOCATION;
         remaining_size -= HEAP_MAX_ALLOCATION;
     }
-    
+
     assert(remaining_size == 0);
 }
 
@@ -425,7 +455,7 @@ parse_u64(c8 *buffer)
     u64 result = 0;
     for(c8 *c = buffer; *c; ++c)
         result = result * 10 + (*c - '0');
-    
+
     return result;
 }
 
@@ -433,10 +463,10 @@ static u64
 parse_hex64(c8 *buffer)
 {
     u64 result = 0;
-    
+
     if(buffer[0] == '0' && buffer[1] == 'x')
         buffer += 2;
-    
+
     for(c8 *c = buffer; *c; ++c)
     {
         if('0' <= *c && *c <= '9')
@@ -456,19 +486,19 @@ tokenize(c8 *buffer, um32 *o_count)
     c8 *c = buffer;
     while(*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n')
         *c++ = '\0';
-    
+
     c8 *first_token = c;
     c8 prev_c = '\0';
     while(*c)
     {
         if(prev_c == '\0')
             ++count;
-        
+
         if(*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n')
             *c = '\0';
         prev_c = *c++;
     }
-    
+
     if(o_count)
         *o_count = count;
     return first_token;
@@ -484,15 +514,31 @@ next_token(c8 *token)
 }
 
 static void
-init_kernel_state(KernelState *state)
+irq_init(void)
 {
+    *(vu32 *)IRQ_ENABLED_1 |= IRQ_INTERRUPT_AUX;
+}
+
+static void
+init_kernel_state(KernelState *state, void *devicetree_addr)
+{
+    g_kernel_state.devicetree_begin = devicetree_addr;
+    g_kernel_state.devicetree_end = devicetree_addr + devicetree_get_total_size(devicetree_addr);
+
+    u32 total_device_addr_count = (&state->last_device_addr - &state->first_device_addr + 1);
+    if(devicetree_traverse(devicetree_addr, init_kernel_addr_range, &g_kernel_state) !=
+       total_device_addr_count)
+    {
+        invalid_code_path;
+    }
+
     for(u32 index = 1; index < KERNEL_MAX_TIMER; ++index)
     {
         Timer *timer = state->timers + index;
         timer->next_free = index - 1;
     }
     state->first_free_timer = KERNEL_MAX_TIMER - 1;
-    
+
     for(u32 index = 1; index < KERNEL_MAX_INTERRUPT; ++index)
     {
         InterruptContext *interrupt = state->interrupts + index;
@@ -503,26 +549,37 @@ init_kernel_state(KernelState *state)
 void
 kernel_main(void *devicetree_addr)
 {
-    *(vu32 *)IRQ_ENABLED_1 |= IRQ_AUX_INT;
+    irq_init();
     mini_uart_init();
     init_timer_for_core_0();
-    
-    init_kernel_state(&g_kernel_state);
-    
-    BootArena *boot_arena = bootstrap_boot_arena((void *)0x10000000, megabytes(16));
+
+    init_kernel_state(&g_kernel_state, devicetree_addr);
+    devicetree_traverse(devicetree_addr, print_devicetree, 0);
+
+    umm boot_arena_size = megabytes(16);
+    void *boot_arena_begin = (void *)0x10000000;
+    void *boot_arena_end = (void *)((umm)boot_arena_begin + boot_arena_size);
+    BootArena *boot_arena = bootstrap_boot_arena(boot_arena_begin, boot_arena_end);
+
+    void *spin_table_begin = (void *)0x0000;
+    void *spin_table_end = (void *)0x1000;
+
     MemoryRegionList *region_list = push_size(boot_arena, sizeof(*region_list));
     init_memory_region_list(region_list, (void *)0x00000000, (void *)0x3c000000);
-    reserve_memory_region(region_list, (void *)0x0000, (void *)0x1000); // spin tables
-    
+    reserve_memory_region(region_list, spin_table_begin, spin_table_end);
+    reserve_memory_region(region_list, &kernel_image_begin, &kernel_image_end);
+    reserve_memory_region(region_list,
+                          g_kernel_state.devicetree_begin, g_kernel_state.devicetree_end);
+    reserve_memory_region(region_list, g_kernel_state.cpio_begin, g_kernel_state.cpio_end);
+    reserve_memory_region(region_list, boot_arena_begin, boot_arena_end);
+
     PagePool page_pool;
     init_page_pool(&page_pool, region_list);
-    
+
     MemoryAllocator allocator;
     init_memory_allocator(&allocator, &page_pool);
-    
-    // devicetree_traverse(devicetree_addr, print_devicetree, 0);
-    devicetree_traverse(devicetree_addr, match_and_init_cpio, &g_cpio_base);
-    
+
+
     add_timer(0, timer_tell_time, 0);
     print_string("Hello, Sailor!\r\n");
     for(;;)
@@ -530,10 +587,10 @@ kernel_main(void *devicetree_addr)
         c8 command[256];
         print_string("# ");
         scan_line(command, array_count(command));
-        
+
         um32 token_count = 0;
         c8 *token = tokenize(command, &token_count);
-        
+
         if(token_count == 0)
         {
             do_nothing;
@@ -648,13 +705,13 @@ kernel_main(void *devicetree_addr)
                 c8 *message = next_token(token);
                 u64 seconds = parse_u64(next_token(message));
                 u64 expiration = seconds * get_timer_frequency();
-                
+
                 um32 len = string_len(message);
                 PrintStringTask *task = alloc_memory(&allocator, sizeof(*task));
                 task->allocator = &allocator;
                 task->string = (c8 *)alloc_memory(&allocator, len + 1);
                 copy_memory(task->string, message, len + 1);
-                
+
                 add_timer(expiration, timer_print_string, task);
             }
             else
