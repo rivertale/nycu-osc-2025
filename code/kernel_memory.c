@@ -121,19 +121,61 @@ get_page_info(PagePool *pool, void *page)
     return pool->page_infos + page_index;
 }
 
+static void
+page_pool_print_free_list(PagePool *pool)
+{
+    s32 max_count = 16;
+    print_string("----------------------------------------------------------------\r\n");
+    print_string("FREE LIST\r\n");
+    for(s32 order = 0; order <= PAGE_MAX_ALLOC_ORDER; ++order)
+    {
+        print_u64(1 << (order + PAGE_MIN_ALLOC_EXPONENT));
+        print_string(" (");
+        print_hex32(1 << (order + PAGE_MIN_ALLOC_EXPONENT));
+        print_string(") bytes: ");
+
+        s32 count = 0;
+        for(PageBlock *block = pool->free_block[order].next;
+            block != &pool->free_block[order];
+            block = block->next)
+        {
+            if(block != pool->free_block[order].next)
+                print_string(", ");
+
+            if(count++ >= max_count)
+            {
+                print_string("...");
+                break;
+            }
+
+            print_hex32((u64)block);
+        }
+        print_string("\r\n");
+    }
+    print_string("----------------------------------------------------------------\r\n");
+}
+
 static u64
 page_pool_get_reservation_bit_index(PagePool *pool, s32 order, void *block)
 {
-    // NOTE: bit index if block index is 00000000 - 11111111 (block_exp=8)
+    // NOTE: bit index if block index is 00000000 - 11111111 (next_exponent_after_page_count=8)
     // 000000000 - 011111111 (order 0)
     // 100000000 - 101111111 (order 1)
     // 110000000 - 110111111 (order 2)
 
-    u64 mask = (1ull << (pool->next_exponent_after_max_page + 1)) - 1;
+    u64 mask = (1ull << (pool->next_exponent_after_page_count + 1)) - 1;
     u64 block_index = ((u8 *)block - pool->base) >> (PAGE_MIN_ALLOC_EXPONENT + order);
-    u64 order_bits = (-1ull << (pool->next_exponent_after_max_page - order)) & mask;
+    u64 order_bits = (-1ull << (pool->next_exponent_after_page_count - order + 1)) & mask;
 
     assert((order_bits & block_index) == 0);
+
+    u64 reservation_count = next_power_of_two(pool->page_count) << 1;
+    if((order_bits | block_index) >= reservation_count)
+    {
+        int x = 1;
+    }
+
+    assert((order_bits | block_index) < reservation_count);
     return order_bits | block_index;
 }
 
@@ -158,9 +200,25 @@ page_pool_unmark_reserved(PagePool *pool, s32 order, void *block)
     pool->reservation[bit_index >> 6] &= ~(1ull << (bit_index & 63));
 }
 
+static s32
+page_pool_calculate_maximum_order(void *ptr)
+{
+    s32 result = find_least_significant_bit((u64)ptr) - PAGE_MIN_ALLOC_EXPONENT;
+    if(result > PAGE_MAX_ALLOC_ORDER)
+        result = PAGE_MAX_ALLOC_ORDER;
+
+    return result;
+}
+
 static void
 free_pages(PagePool *pool, void *ptr)
 {
+    print_string("= = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = \r\n");
+    print_string("FREE PAGES\r\n");
+    print_string("PTR: ");
+    print_hex32((u64)ptr);
+    print_string("\r\n");
+
     if(!ptr)
         return;
 
@@ -174,6 +232,11 @@ free_pages(PagePool *pool, void *ptr)
         ++order;
     }
 
+    print_string("order is ");
+    print_u64(order);
+    print_string(" (");
+    print_u64(1 << (order + PAGE_MIN_ALLOC_EXPONENT));
+    print_string(" bytes)\r\n");
     if(order <= PAGE_MAX_ALLOC_ORDER)
     {
         // NOTE: we are not sure if we are freeing valid memory
@@ -190,6 +253,18 @@ free_pages(PagePool *pool, void *ptr)
             page_pool_unmark_reserved(pool, order, block);
             double_link_remove(buddy);
 
+            print_string("merge block {");
+            print_hex32((u64)block);
+            print_string(", ");
+            print_hex32((u64)buddy);
+            print_string("} to ");
+            print_hex32((u64)block & ~(1 << exponent));
+            print_string("(order ");
+            print_u64(order + 1);
+            print_string(", ");
+            print_u64(1 << (order + 1 + PAGE_MIN_ALLOC_EXPONENT));
+            print_string(" bytes)\r\n");
+
             block = (PageBlock *)((u64)block & ~(1 << exponent));
             ++order;
         }
@@ -199,11 +274,18 @@ free_pages(PagePool *pool, void *ptr)
     {
         debug_log("free invalid memory");
     }
+
+    page_pool_print_free_list(pool);
+    print_string("================================================================\r\n");
+    print_string("\r\n");
 }
 
 static void *
 alloc_pages(PagePool *pool, umm size)
 {
+    print_string("= = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = \r\n");
+    print_string("ALLOCATE PAGES\r\n");
+
     void *result = 0;
     if(0 < size && size <= PAGE_MAX_ALLOC_SIZE)
     {
@@ -236,11 +318,36 @@ alloc_pages(PagePool *pool, umm size)
                 PageBlock *high_block = (PageBlock *)((u8 *)block + split_size);
                 double_link_insert_at_last(&pool->free_block[split_order], low_block);
                 double_link_insert_at_last(&pool->free_block[split_order], high_block);
+
+                print_string("split block ");
+                print_hex32((u64)block);
+                print_string(" (order ");
+                print_u64(split_order + 1);
+                print_string(", ");
+                print_u64(split_size << 1);
+                print_string(" bytes) to {");
+                print_hex32((u64)low_block);
+                print_string(", ");
+                print_hex32((u64)high_block);
+                print_string("}\r\n");
             }
 
             result = (void *)pool->free_block[split_order].next;
-            double_link_remove((PageBlock *)result);
+
+            PageBlock *b = (PageBlock *)result;
+            b->prev->next = b->next;
+            b->next->prev = b->prev;
+
+            // double_link_remove((PageBlock *)result);
             page_pool_mark_reserved(pool, order, result);
+
+            print_string("allocate block ");
+            print_hex32((u64)result);
+            print_string(" (order ");
+            print_u64(order + 1);
+            print_string(", ");
+            print_u64(1 << (order + PAGE_MIN_ALLOC_EXPONENT));
+            print_string(" bytes)\r\n");
 
             clear_memory(result, size);
         }
@@ -249,6 +356,13 @@ alloc_pages(PagePool *pool, umm size)
             debug_log("out of memory");
         }
     }
+
+    page_pool_print_free_list(pool);
+    print_string("RESULT PAGES: ");
+    print_hex32((u64)result);
+    print_string("\r\n");
+    print_string("================================================================\r\n");
+    print_string("\r\n");
     return result;
 }
 
@@ -256,7 +370,7 @@ static void
 init_page_pool(PagePool *pool, MemoryRegionList *region_list)
 {
     clear_memory(pool, sizeof(*pool));
-    for(s32 order = 0; order < PAGE_MAX_ALLOC_ORDER; ++order)
+    for(s32 order = 0; order <= PAGE_MAX_ALLOC_ORDER; ++order)
     {
         double_link_init(&pool->free_block[order]);
     }
@@ -269,12 +383,14 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
     u64 reservation_lowest = align_down((u64)first_region->low, PAGE_MAX_ALLOC_SIZE);
     u64 reservation_highest = align_up((u64)last_region->high, PAGE_MAX_ALLOC_SIZE);
 
-    u64 max_page_count = (reservation_highest - reservation_lowest) >> PAGE_MIN_ALLOC_EXPONENT;
-    u64 max_reservation_count = max_page_count << 1;
+    u64 page_count = (reservation_highest - reservation_lowest) >> PAGE_MIN_ALLOC_EXPONENT;
+    u64 reservation_count = next_power_of_two(page_count) << 1;
 
-    u64 page_info_size = max_page_count * sizeof(PageInfo);
-    u64 reservation_size = align_up(max_reservation_count, 64) >> 3;
+    u64 page_info_size = page_count * sizeof(PageInfo);
+    u64 reservation_size = align_up(reservation_count, 64) >> 3;
 
+    pool->next_exponent_after_page_count = find_most_significant_bit(next_power_of_two(page_count));
+    pool->page_count = page_count;
     pool->base = (u8 *)reservation_lowest;
 
     // NOTE: reserve byte 0
@@ -308,26 +424,41 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
     clear_memory(pool->reservation, reservation_size);
 
 
+    print_string("put page info at {");
+    print_hex32((u64)pool->page_infos);
+    print_string(", ");
+    print_hex32((u64)pool->page_infos + page_info_size);
+    print_string("}\r\n");
+
+    print_string("put reservation at {");
+    print_hex32((u64)pool->reservation);
+    print_string(", ");
+    print_hex32((u64)pool->reservation + reservation_size);
+    print_string("}\r\n");
+
     for(s32 index = 0; index < region_list->count; ++index)
     {
         MemoryRegion *region = region_list->regions + index;
 
         u8 *low = (u8 *)align_up((u64)region->low, PAGE_MIN_ALLOC_SIZE);
         u8 *high = (u8 *)align_down((u64)region->high, PAGE_MIN_ALLOC_SIZE);
-        s32 low_order = find_least_significant_bit((u64)low) - PAGE_MIN_ALLOC_EXPONENT;
-        s32 high_order = find_least_significant_bit((u64)high) - PAGE_MIN_ALLOC_EXPONENT;
+        s32 low_order = page_pool_calculate_maximum_order(low);
+        s32 high_order = page_pool_calculate_maximum_order(high);
 
-        assert(low_order >= 0 && high_order >= 0);
         while(low < high)
         {
+            assert(0 <= low_order && low_order <= PAGE_MAX_ALLOC_ORDER);
+            assert(0 <= high_order && high_order <= PAGE_MAX_ALLOC_ORDER);
+
             if(low_order <= high_order)
             {
                 u32 block_size = 1 << (low_order + PAGE_MIN_ALLOC_EXPONENT);
 
                 PageBlock *block = (PageBlock *)low;
                 double_link_insert_at_last(&pool->free_block[low_order], block);
+
                 low += block_size;
-                low_order = find_least_significant_bit((u64)low) - PAGE_MIN_ALLOC_EXPONENT;
+                low_order = page_pool_calculate_maximum_order(low);
             }
             else
             {
@@ -335,46 +466,146 @@ init_page_pool(PagePool *pool, MemoryRegionList *region_list)
 
                 PageBlock *block = (PageBlock *)(high - block_size);
                 double_link_insert_at_last(&pool->free_block[high_order], block);
+
                 high -= block_size;
-                high_order = find_least_significant_bit((u64)high) - PAGE_MIN_ALLOC_EXPONENT;
+                high_order = page_pool_calculate_maximum_order(high);
             }
         }
     }
 
-    for(s32 order = 0; order < PAGE_MAX_ALLOC_ORDER; ++order)
+    for(u8 *block = (u8 *)reservation_lowest;
+        block < (u8 *)reservation_highest;
+        block += PAGE_MAX_ALLOC_SIZE)
+    {
+        page_pool_mark_reserved(pool, PAGE_MAX_ALLOC_ORDER, block);
+    }
+
+    for(s32 free_order = 0; free_order <= PAGE_MAX_ALLOC_ORDER; ++free_order)
+    {
+        for(PageBlock *free_block = pool->free_block[free_order].next;
+            free_block != &pool->free_block[free_order];
+            free_block = free_block->next)
+        {
+            PageBlock *block = free_block;
+            for(s32 order = free_order; order < PAGE_MAX_ALLOC_ORDER; ++order)
+            {
+                u32 block_size = 1 << (order + PAGE_MIN_ALLOC_EXPONENT);
+                PageBlock *buddy = (PageBlock *)((u64)block ^ block_size);
+                page_pool_mark_reserved(pool, order, block);
+                page_pool_mark_reserved(pool, order, buddy);
+                block = (PageBlock *)((u64)block & ~block_size);
+            }
+            page_pool_mark_reserved(pool, PAGE_MAX_ALLOC_ORDER, block);
+        }
+    }
+
+    for(s32 order = 0; order <= PAGE_MAX_ALLOC_ORDER; ++order)
     {
         for(PageBlock *block = pool->free_block[order].next;
             block != &pool->free_block[order];
             block = block->next)
         {
-            s32 exponent = PAGE_MIN_ALLOC_EXPONENT + order;
-            PageBlock *buddy = (PageBlock *)((u64)block ^ (1 << exponent));
-            page_pool_mark_reserved(pool, order, buddy);
+            page_pool_unmark_reserved(pool, order, block);
         }
     }
 
-    u32 region_index = 0;
-    MemoryRegion *region = region_list->regions;
-    MemoryRegion *sentinel = region_list->regions + region_list->count;
-    u64 block = reservation_lowest;
-    while(block < reservation_highest)
-    {
-        if(region == sentinel)
-            break;
-
-        if(block + PAGE_MAX_ALLOC_SIZE <= (u64)region->low)
-        {
-            page_pool_mark_reserved(pool, PAGE_MAX_ALLOC_ORDER, (void *)block);
-            block += PAGE_MAX_ALLOC_SIZE;
-        }
-        else
-        {
-            ++region;
-        }
-    }
+    print_string("= = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = \r\n");
+    print_string("INIT PAGE POOL\r\n");
+    page_pool_print_free_list(pool);
+    print_string("================================================================\r\n");
+    print_string("\r\n");
 
     void *region_list_ptr = (void *)align_down((u64)region_list, PAGE_MIN_ALLOC_SIZE);
     free_pages(pool, region_list_ptr);
+}
+
+static void
+memory_allocator_print_cache(MemoryAllocator *allocator)
+{
+    s32 max_count = 16;
+
+    print_string("----------------------------------------------------------------\r\n");
+    print_string("SLAB: ");
+
+    s32 count = 0;
+    for(Slab *slab = allocator->first_free_slab; slab; slab = slab->next_free)
+    {
+        if(slab != allocator->first_free_slab)
+            print_string(", ");
+
+        if(count++ >= max_count)
+        {
+            print_string("...");
+            break;
+        }
+
+        print_hex32((u64)slab);
+    }
+    print_string("\r\n");
+
+    print_string("----------------------------------------------------------------\r\n");
+    print_string("FULL CACHE\r\n");
+    for(s32 exponent = 0; exponent <= ALLOCATOR_MAX_SLAB_EXPONENT; ++exponent)
+    {
+        print_u64(g_allocator_cache_index_to_size_map[exponent]);
+        print_string(" bytes: ");
+
+        s32 count = 0;
+        for(SlabLink *link = allocator->full_cache[exponent].next;
+            link != &allocator->full_cache[exponent];
+            link = link->next)
+        {
+            if(link != allocator->full_cache[exponent].next)
+                print_string(", ");
+
+            if(count++ >= max_count)
+            {
+                print_string("...");
+                break;
+            }
+
+            Slab *slab = (Slab *)link;
+            print_hex32((u64)slab->memory);
+            print_string(" [");
+            print_u64(slab->allocation_count);
+            print_string("/");
+            print_u64(slab->max_allocation_count);
+            print_string("]");
+        }
+        print_string("\r\n");
+    }
+    print_string("----------------------------------------------------------------\r\n");
+    print_string("PARTIAL CACHE\r\n");
+    for(s32 exponent = 0; exponent <= ALLOCATOR_MAX_SLAB_EXPONENT; ++exponent)
+    {
+        print_u64(g_allocator_cache_index_to_size_map[exponent]);
+        print_string(" bytes: ");
+
+        s32 count = 0;
+        for(SlabLink *link = allocator->partial_cache[exponent].next;
+            link != &allocator->partial_cache[exponent];
+            link = link->next)
+        {
+            if(link != allocator->partial_cache[exponent].next)
+                print_string(", ");
+
+            if(count++ >= max_count)
+            {
+                print_string("...");
+                break;
+            }
+
+            Slab *slab = (Slab *)link;
+            print_hex32((u64)slab->memory);
+            print_string(" [");
+            print_u64(slab->allocation_count);
+            print_string("/");
+            print_u64(slab->max_allocation_count);
+            print_string("]");
+        }
+        print_string("\r\n");
+    }
+    print_string("----------------------------------------------------------------\r\n");
 }
 
 static Slab *
@@ -418,6 +649,7 @@ create_slab(MemoryAllocator *allocator, s32 cache_index, umm allocation_size)
         slab->first_free_allocation = allocation;
     }
 
+    double_link_insert_at_last(&allocator->partial_cache[cache_index], &slab->link);
     return slab;
 }
 
@@ -434,6 +666,9 @@ free_memory(MemoryAllocator *allocator, void *ptr)
     Slab *slab = page_info->slab;
     if(slab)
     {
+        print_string("= = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = \r\n");
+        print_string("FREE MEMORY\r\n");
+
         assert(slab->allocation_count > 0);
 
         --slab->allocation_count;
@@ -457,6 +692,10 @@ free_memory(MemoryAllocator *allocator, void *ptr)
             allocation->next_free = slab->first_free_allocation;
             slab->first_free_allocation = allocation;
         }
+
+        memory_allocator_print_cache(allocator);
+        print_string("================================================================\r\n");
+        print_string("\r\n");
     }
     else
     {
@@ -472,17 +711,24 @@ alloc_memory(MemoryAllocator *allocator, umm size)
     {
         if(size <= ALLOCATOR_MAX_SLAB_SIZE)
         {
+            print_string("= = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = \r\n");
+            print_string("ALLOCATE MEMORY\r\n");
+
             s32 cache_index = 0;
             if(size <= ALLOCATOR_MAX_MAPPED_SIZE)
             {
                 size = align_up(size, ALLOCATOR_MAP_GRANULARITY);
+
                 cache_index =
                     g_allocator_size_to_cache_index_map[size >> ALLOCATOR_MAP_GRANULARITY_EXPONENT];
+                size = g_allocator_cache_index_to_size_map[cache_index];
             }
             else
             {
                 size = next_power_of_two(size);
+
                 cache_index = find_most_significant_bit(size);
+                size = 1 << cache_index;
             }
 
             if(double_link_is_empty(&allocator->partial_cache[cache_index]))
@@ -503,12 +749,20 @@ alloc_memory(MemoryAllocator *allocator, umm size)
             }
 
             clear_memory(result, size);
+
+            memory_allocator_print_cache(allocator);
+            print_string("RESULT MEMORY: ");
+            print_hex32((u64)result);
+            print_string("\r\n");
+            print_string("================================================================\r\n");
+            print_string("\r\n");
         }
         else
         {
             result = alloc_pages(allocator->page_pool, size);
         }
     }
+
     return result;
 }
 
@@ -517,7 +771,7 @@ init_memory_allocator(MemoryAllocator *allocator, PagePool *page_pool)
 {
     clear_memory(allocator, sizeof(*allocator));
     allocator->page_pool = page_pool;
-    for(s32 index = 0; index < ALLOCATOR_MAX_SLAB_EXPONENT; ++index)
+    for(s32 index = 0; index <= ALLOCATOR_MAX_SLAB_EXPONENT; ++index)
     {
         double_link_init(&allocator->full_cache[index]);
         double_link_init(&allocator->partial_cache[index]);

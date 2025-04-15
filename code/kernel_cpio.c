@@ -81,7 +81,7 @@ cpio_next_file(void *handle)
 static void *
 cpio_find_first_file(void)
 {
-    void *handle = g_cpio_base;
+    void *handle = g_kernel_state.cpio_begin;
     if(!cpio_is_valid(handle) || cpio_is_sentinel(handle))
         handle = 0;
 

@@ -29,23 +29,24 @@ add_interrupt(InterruptKind kind)
 static void
 handle_irq_interrupt(void)
 {
+    // TODO: accept new interrupt in handler
     KernelState *state = &g_kernel_state;
 
     u32 pending_0 = *(vu32 *)IRQ_PENDING_0;
     if(pending_0 & IRQ_PENDING_0_SET_1)
     {
-        // NOTE: irq pending 1 has bit set
+        // irq pending 1 has bit set
         u32 pending_1 = *(vu32 *)IRQ_PENDING_1;
         if(pending_1 & IRQ_INTERRUPT_AUX)
         {
-            // NOTE: aux interrupt is pending
+            // aux interrupt is pending
             if(*(vu32 *)AUX_IRQ & AUX_IRQ_MINI_UART)
             {
-                // NOTE: mini uart interrupt is pending
+                // mini uart interrupt is pending
                 u32 iir = *(vu32 *)AUX_MU_IIR_REG;
                 assert((iir & AUX_MU_IIR_PENDING) == 0);
 
-                // NOTE: AUX_MU_IIR_TRANSMIT and AUX_MU_IIR_RECEIVE won't be set at the same time
+                // AUX_MU_IIR_TRANSMIT and AUX_MU_IIR_RECEIVE won't be set at the same time
                 if(iir & AUX_MU_IIR_TRANSMIT)
                 {
                     if(state->write_cur0 != state->write_cur1)
@@ -71,12 +72,12 @@ handle_irq_interrupt(void)
 
     if(pending_0 & IRQ_PENDING_0_SET_2)
     {
-        // NOTE: irq pending 2 has bit set
+        // irq pending 2 has bit set
         do_nothing;
     }
 
-    // TODO
-#if 0
+    u32 irq_core0_source = *(vu32 *)IRQ_CORE0_INTERRUPT_SOURCE;
+    if(irq_core0_source & IRQ_CORE_INTERRUPT_SOURCE_CNTPNSIRQ)
     {
         // timer
         assert(state->first_expired_timer);
@@ -97,7 +98,6 @@ handle_irq_interrupt(void)
             disable_timer();
         }
     }
-#endif
 }
 
 void

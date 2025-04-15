@@ -53,14 +53,14 @@ typedef struct PageBlock
 
 typedef struct PagePool
 {
-    s32 next_exponent_after_max_page;
+    s32 next_exponent_after_page_count;
     u8 *base;
     u64 *reservation;
 
-    u64 max_page;
+    u64 page_count;
     PageInfo *page_infos;
 
-    PageBlock free_block[PAGE_MAX_ALLOC_ORDER];
+    PageBlock free_block[PAGE_MAX_ALLOC_ORDER + 1];
 } PagePool;
 
 typedef struct SlabAllocation
@@ -93,6 +93,7 @@ typedef union Slab
 // cache_index: 0, 1, 2,  3,  4,  5,  6,   7,   8,   9,    10,  11
 static s32 g_allocator_size_to_cache_index_map[] =
 {
+    0,
     2, // ALLOCATOR_MAP_GRANULARITY * 1
     3, // ALLOCATOR_MAP_GRANULARITY * 2
     4, // ALLOCATOR_MAP_GRANULARITY * 3
@@ -105,6 +106,11 @@ static s32 g_allocator_size_to_cache_index_map[] =
     7, // ALLOCATOR_MAP_GRANULARITY * 10
     7, // ALLOCATOR_MAP_GRANULARITY * 11
     7, // ALLOCATOR_MAP_GRANULARITY * 12
+};
+
+static u32 g_allocator_cache_index_to_size_map[] =
+{
+    0, 0, 16, 32, 64, 96, 128, 192, 256, 512, 1024, 2048
 };
 
 typedef struct MemoryAllocator

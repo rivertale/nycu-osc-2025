@@ -10,19 +10,9 @@
 #include "kernel_watchdog.h"
 #include "uart.h"
 
-#define CORE0_TIMER_IRQ_CTRL 0x40000040
-
-#define HEAP_MIN_ORDER 4 // 16 byte allocation - at least hold a HeapFreeLink
-#define HEAP_MAX_ORDER 18 // 1mb allocation
-#define HEAP_ORDER_BIT_IN_MAP 4 // we assumed it's divided by 64
-#define HEAP_MIN_ALLOCATION (1 << HEAP_MIN_ORDER)
-#define HEAP_MAX_ALLOCATION (1 << HEAP_MAX_ORDER)
-
 // TODO: the naming is starting to be confusing between kernel and user program
 #define USER_SPACE_BEGIN 0x800000
 #define USER_SPACE_END 0xb00000
-extern void *heap_begin;
-extern void *heap_size;
 
 #define double_link_insert_at_last(sentinel, link) \
 do \
@@ -48,25 +38,6 @@ do \
 } while(0)
 
 #define double_link_is_empty(link) ((link)->next == (link))
-
-typedef struct HeapBlock
-{
-    struct HeapBlock *prev;
-    struct HeapBlock *next;
-} HeapBlock;
-
-typedef struct Heap
-{
-    u32 served_mask;
-    s32 order_shift;
-    umm in_used;
-    umm total;
-    u8 *base;
-    u64 *served;
-    HeapBlock free_block[HEAP_MAX_ORDER + 1];
-    u8 *memory;
-    umm memory_used;
-} Heap;
 
 #define KERNEL_MAX_IO_BUFFER_SIZE 4096
 #define KERNEL_IO_BUFFER_MASK (KERNEL_MAX_IO_BUFFER_SIZE - 1)

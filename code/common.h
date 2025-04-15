@@ -112,7 +112,7 @@ static b32
 memory_match(void *a, void *b, umm size)
 {
     b32 result = 1;
-    
+
     u8 *byte_a = (u8 *)a;
     u8 *byte_b = (u8 *)b;
     while(size-- > 0)
@@ -130,7 +130,7 @@ string_len(c8 *string)
     umm result = 0;
     while(*string++)
         ++result;
-    
+
     return result;
 }
 

@@ -122,18 +122,19 @@ read_entire_file(c8 *path)
 int
 main(int arg_count, c8 **args)
 {
-    if(arg_count != 3)
+    if(arg_count != 2)
     {
-        printf("usage: send_kernel <kernel_path> <tty_num>\n");
+        printf("usage: send_kernel <tty_num>\n");
+        printf("NOTE: the kernel image should named 'kernel.img'\n");
         return 0;
     }
 
-    c8 *kernel_path = args[1];
+    c8 *kernel_path = "kernel.img";
     c8 device_path[256];
-    if(args[2][0] == 'p')
-        snprintf(device_path, sizeof(device_path), "/dev/pts/%s", args[2] + 1);
+    if(args[1][0] == 'p')
+        snprintf(device_path, sizeof(device_path), "/dev/pts/%s", args[1] + 1);
     else
-        snprintf(device_path, sizeof(device_path), "/dev/ttyUSB%s", args[2]);
+        snprintf(device_path, sizeof(device_path), "/dev/ttyUSB%s", args[1]);
 
     LoadedFile kernel = read_entire_file(kernel_path);
     BootHeader header = {0};

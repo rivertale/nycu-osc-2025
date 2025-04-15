@@ -27,6 +27,4 @@ typedef struct CpioNewcHeader
     // pad to 4-byte boundary
 } CpioNewcHeader;
 
-static void *g_cpio_base = 0;
-
 #endif //KERNEL_CPIO_H

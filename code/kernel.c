@@ -2,7 +2,6 @@
 #include "kernel_cpio.c"
 #include "kernel_devicetree.c"
 #include "kernel_mailbox.c"
-#include "kernel_memory.c"
 #include "kernel_watchdog.c"
 #include "uart.c"
 
@@ -13,6 +12,7 @@ static void print_hex64(u64 value);
 static void print_u64(u64 value);
 #include "kernel_timer.c"
 #include "kernel_interrupt.c"
+#include "kernel_memory.c"
 
 static void
 read_console(void *buffer, u64 size)
@@ -174,6 +174,22 @@ scan_line(c8 *string, um32 max_len)
                     ++remaining_len;
                 }
             }
+            else if(c == 0x1b) // NOTE: echo and skip escape sequence
+            {
+                read_console(&c, sizeof(c));
+                mini_uart_write_byte(0x1b);
+                mini_uart_write_byte('[');
+                if(c == 'O' || c == '[')
+                {
+                    for(;;)
+                    {
+                        read_console(&c, sizeof(c));
+                        mini_uart_write_byte(c);
+                        if(0x40 <= c && c <= 0x7e)
+                            break;
+                    }
+                }
+            }
             else
             {
                 mini_uart_write_byte(c);
@@ -260,175 +276,6 @@ DEVICETREE_CALLBACK(print_devicetree)
     return 0;
 }
 
-static u64
-heap_get_served_bit_index(Heap *heap, s32 order, void *block)
-{
-    u64 block_index = ((u8 *)block - heap->base) >> order;
-    s32 order_shift = heap->order_shift - (order - HEAP_MIN_ORDER);
-    u64 bit_index = ((-1ull << order_shift) | block_index) & heap->served_mask;
-    return bit_index;
-}
-
-static void
-heap_mark_served(Heap *heap, s32 order, void *block)
-{
-    u64 bit_index = heap_get_served_bit_index(heap, order, block);
-    heap->served[bit_index >> 6] |= (1ull << (bit_index & 63));
-}
-
-static void
-heap_unmark_served(Heap *heap, s32 order, void *block)
-{
-    u64 bit_index = heap_get_served_bit_index(heap, order, block);
-    heap->served[bit_index >> 6] &= ~(1ull << (bit_index & 63));
-}
-
-static b32
-heap_is_served(Heap *heap, s32 order, void *block)
-{
-    u64 bit_index = heap_get_served_bit_index(heap, order, block);
-    return heap->served[bit_index >> 6] & (1ull << (bit_index & 63));
-}
-
-static void *
-heap_alloc(Heap *heap, umm size)
-{
-    void *result1 = (void *)(heap->memory + heap->memory_used);
-    heap->memory_used += size;
-    return result1;
-
-    return 0;
-    void *result = 0;
-    if(size > 0)
-    {
-        if(size < HEAP_MIN_ALLOCATION)
-            size = HEAP_MIN_ALLOCATION;
-        size = next_power_of_two(size);
-
-        s32 alloc_order = find_most_significant_bit(size);
-        assert(HEAP_MIN_ORDER <= alloc_order && alloc_order <= HEAP_MAX_ORDER);
-        heap->in_used += (1 << alloc_order);
-
-        s32 order = alloc_order;
-        while(order <= HEAP_MAX_ORDER)
-        {
-            if(!double_link_is_empty(&heap->free_block[order]))
-                break;
-            ++order;
-        }
-
-        if(order > HEAP_MAX_ORDER)
-        {
-            // NOTE: out of memory
-            assert(0);
-        }
-
-        while(order > alloc_order)
-        {
-            HeapBlock *block = heap->free_block[order].next;
-            double_link_remove(block);
-            heap_mark_served(heap, order, block);
-
-            // NOTE: split the block until it fits the allocated size
-            --order;
-            um32 split_size = 1 << order;
-            HeapBlock *block0 = (HeapBlock *)((u8 *)block);
-            HeapBlock *block1 = (HeapBlock *)((u8 *)block + split_size);
-
-            double_link_insert_at_last(&heap->free_block[order], block0);
-            double_link_insert_at_last(&heap->free_block[order], block1);
-        }
-
-        result = (void *)heap->free_block[alloc_order].next;
-        double_link_remove((HeapBlock *)result);
-        heap_mark_served(heap, order, result);
-    }
-    return result;
-}
-
-static void
-heap_free(Heap *heap, void *ptr)
-{
-    return;
-    HeapBlock *block = (HeapBlock *)ptr;
-    s32 order = HEAP_MIN_ORDER;
-    while(order <= HEAP_MAX_ORDER)
-    {
-        if(heap_is_served(heap, order, block))
-            break;
-
-        ++order;
-    }
-    assert(order <= HEAP_MAX_ORDER);
-    heap_unmark_served(heap, order, block);
-    heap->in_used -= (1 << order);
-
-    while(order < HEAP_MAX_ORDER)
-    {
-        umm offset = (u8 *)block - heap->base;
-        HeapBlock *buddy = (HeapBlock *)(heap->base + (offset ^ (1 << order)));
-        if(heap_is_served(heap, order, buddy))
-            break;
-
-        heap_unmark_served(heap, order, block);
-        double_link_remove(buddy);
-
-        block = (HeapBlock *)(heap->base + (offset & ~(1 << order)));
-        ++order;
-    }
-    double_link_insert_at_last(&heap->free_block[order], block);
-}
-
-static void
-heap_init(Heap *heap, void *addr, umm size)
-{
-    heap->memory = addr;
-
-    size = align_up(size - ((umm)addr & 15), HEAP_MAX_ALLOCATION);
-    addr = (void *)align_up((umm)addr, 16);
-
-    clear_memory(heap, sizeof(*heap));
-    u64 max_block_count = size / HEAP_MIN_ALLOCATION;
-    u64 max_served_count = max_block_count << 1;
-    u64 served_size = align_up(max_served_count, 8 * HEAP_MIN_ALLOCATION) / 8;
-
-    heap->total = size;
-    heap->served_mask = max_served_count - 1;
-    heap->order_shift = find_most_significant_bit(max_block_count) + 1;
-    heap->base = addr;
-    heap->served = (u64 *)addr;
-
-    clear_memory(heap->served, served_size);
-    for(s32 order = HEAP_MIN_ORDER; order <= HEAP_MAX_ORDER; ++order)
-        double_link_init(&heap->free_block[order]);
-
-    s32 order = find_most_significant_bit(served_size);
-    umm block_size = 1 << order;
-    u8 *cur = (u8 *)addr + block_size;
-    umm remaining_size = size - block_size;
-    while(order < HEAP_MAX_ORDER)
-    {
-        block_size = 1 << order;
-        if(remaining_size < block_size)
-            break;
-        double_link_insert_at_last(&heap->free_block[order], (HeapBlock *)cur);
-        heap_mark_served(heap, order, cur);
-        cur += block_size;
-        remaining_size -= block_size;
-        ++order;
-    }
-
-    while(remaining_size >= HEAP_MAX_ALLOCATION)
-    {
-        double_link_insert_at_last(&heap->free_block[HEAP_MAX_ORDER], (HeapBlock *)cur);
-        heap_mark_served(heap, HEAP_MAX_ORDER, cur);
-        cur += HEAP_MAX_ALLOCATION;
-        remaining_size -= HEAP_MAX_ALLOCATION;
-    }
-
-    assert(remaining_size == 0);
-}
-
 static
 KERNEL_TIMER_CALLBACK(timer_print_string)
 {
@@ -491,11 +338,12 @@ tokenize(c8 *buffer, um32 *o_count)
     c8 prev_c = '\0';
     while(*c)
     {
-        if(prev_c == '\0')
-            ++count;
-
         if(*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n')
             *c = '\0';
+
+        if(prev_c == '\0' && *c)
+            ++count;
+
         prev_c = *c++;
     }
 
@@ -546,17 +394,27 @@ init_kernel_state(KernelState *state, void *devicetree_addr)
     }
 }
 
+static void
+enable_simd_instruction(void)
+{
+    u64 cpacr_el1 = 0;
+    __asm__ volatile ("mrs %0, cpacr_el1" : "=r"(cpacr_el1));
+    cpacr_el1 |= (3 << 20);
+    __asm__ volatile ("msr cpacr_el1, %0" :: "r"(cpacr_el1));
+}
+
 void
 kernel_main(void *devicetree_addr)
 {
+    enable_simd_instruction();
     irq_init();
     mini_uart_init();
     init_timer_for_core_0();
 
     init_kernel_state(&g_kernel_state, devicetree_addr);
-    devicetree_traverse(devicetree_addr, print_devicetree, 0);
+    // devicetree_traverse(devicetree_addr, print_devicetree, 0);
 
-    umm boot_arena_size = megabytes(16);
+    umm boot_arena_size = PAGE_MAX_ALLOC_SIZE;
     void *boot_arena_begin = (void *)0x10000000;
     void *boot_arena_end = (void *)((umm)boot_arena_begin + boot_arena_size);
     BootArena *boot_arena = bootstrap_boot_arena(boot_arena_begin, boot_arena_end);
@@ -580,7 +438,7 @@ kernel_main(void *devicetree_addr)
     init_memory_allocator(&allocator, &page_pool);
 
 
-    add_timer(0, timer_tell_time, 0);
+    // add_timer(0, timer_tell_time, 0);
     print_string("Hello, Sailor!\r\n");
     for(;;)
     {
@@ -671,8 +529,8 @@ kernel_main(void *devicetree_addr)
             {
                 umm size = parse_u64(next_token(token));
                 void *ptr = alloc_memory(&allocator, size);
-                print_hex64((umm)ptr);
-                print_string("\r\n");
+                // print_hex64((umm)ptr);
+                // print_string("\r\n");
             }
             else
             {

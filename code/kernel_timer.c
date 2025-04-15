@@ -4,7 +4,7 @@ init_timer_for_core_0(void)
     __asm__ volatile("mov x0, 2\n"
                      "ldr x1, =%0\n"
                      "str w0, [x1]\n"
-                     :: "i"(CORE0_TIMER_IRQ_CTRL));
+                     :: "i"(IRQ_CORE0_TIMER_CTRL));
 }
 
 static inline void
