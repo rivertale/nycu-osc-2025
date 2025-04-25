@@ -29,6 +29,10 @@ typedef volatile u32 vu32;
 #define debug_log1(log, file, line) debug_log2(log, file, #line)
 #define debug_log2(log, file, line) mini_uart_write_const("[DEBUG] " file "(" line "): " log);
 
+#define mini_uart_write_const(array) \
+mini_uart_write(array, (array_count(array) - 1) * sizeof(array[0]))
+static void mini_uart_write(void *buffer, umm size);
+
 #define invalid_code_path assert(0)
 #define assert(condition) assert1(condition, __FILE__, __LINE__)
 #define assert1(condition, file, line) assert2(condition, file, line)

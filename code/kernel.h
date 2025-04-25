@@ -3,12 +3,10 @@
 
 #include "common.h"
 #include "peripheral.h"
-#include "kernel_cpio.h"
-#include "kernel_devicetree.h"
-#include "kernel_mailbox.h"
-#include "kernel_memory.h"
-#include "kernel_watchdog.h"
+#include "kernel_device.h"
 #include "uart.h"
+#include "kernel_memory.h"
+#include "kernel_scheduler.h"
 
 // TODO: the naming is starting to be confusing between kernel and user program
 #define USER_SPACE_BEGIN 0x800000
@@ -79,6 +77,12 @@ typedef struct InterruptContext
 
 typedef struct KernelState
 {
+    ThreadId prev_created_thread_id;
+    
+    PagePool page_pool;
+    MemoryAllocator allocator;
+    Scheduler scheduler;
+    
     u32 read_cur0;
     u32 read_cur1;
     u32 write_cur0;
@@ -89,11 +93,8 @@ typedef struct KernelState
 
     u32 first_free_interrupt;
     u32 first_prioritized_interrupt;
-
-    void *devicetree_begin;
-    void *devicetree_end;
-    union { void *cpio_begin; void *first_device_addr; };
-    union { void *cpio_end; void *last_device_addr; };
+    
+    void *cpio_handle;
 
     u8 read_buffer[KERNEL_MAX_IO_BUFFER_SIZE];
     u8 write_buffer[KERNEL_MAX_IO_BUFFER_SIZE];

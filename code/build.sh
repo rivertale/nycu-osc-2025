@@ -13,13 +13,15 @@ link_flags="-m aarch64elf"
 image_flags="--output-target=aarch64-rpi3-elf -O binary"
 
 echo "Compiling bootloader..."
-clang-18 ${compile_flags} ${code_dir}/bootloader_startup.S ${code_dir}/bootloader.c
-ld.lld-18 ${link_flags} -T ${code_dir}/bootloader.ld -o bootloader.elf bootloader_startup.o bootloader.o
+clang-18 ${compile_flags} ${code_dir}/bootloader.S -o bootloader_asm.o
+clang-18 ${compile_flags} ${code_dir}/bootloader.c -o bootloader.o
+ld.lld-18 ${link_flags} -T ${code_dir}/bootloader.ld -o bootloader.elf bootloader_asm.o bootloader.o
 llvm-objcopy-18 ${image_flags} bootloader.elf bootloader.img
 
 echo "Compiling kernel..."
-clang-18 ${compile_flags} ${code_dir}/kernel_startup.S ${code_dir}/kernel.c
-ld.lld-18 ${link_flags} -T ${code_dir}/kernel.ld -o kernel.elf kernel_startup.o kernel.o
+clang-18 ${compile_flags} ${code_dir}/kernel.S -o kernel_asm.o
+clang-18 ${compile_flags} ${code_dir}/kernel.c -o kernel.o
+ld.lld-18 ${link_flags} -T ${code_dir}/kernel.ld -o kernel.elf kernel_asm.o kernel.o
 llvm-objcopy-18 ${image_flags} kernel.elf kernel.img
 
 echo "Compiling user programs..."

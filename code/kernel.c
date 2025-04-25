@@ -1,8 +1,5 @@
 #include "kernel.h"
-#include "kernel_cpio.c"
-#include "kernel_devicetree.c"
-#include "kernel_mailbox.c"
-#include "kernel_watchdog.c"
+#include "kernel_device.c"
 #include "uart.c"
 
 static void print_buffer(c8 *buffer, umm size);
@@ -13,6 +10,7 @@ static void print_u64(u64 value);
 #include "kernel_timer.c"
 #include "kernel_interrupt.c"
 #include "kernel_memory.c"
+#include "kernel_scheduler.c"
 
 static void
 read_console(void *buffer, u64 size)
@@ -206,77 +204,6 @@ scan_line(c8 *string, um32 max_len)
 }
 
 static
-DEVICETREE_CALLBACK(init_kernel_addr_range)
-{
-    b32 result = 0;
-
-    KernelState *state = (void *)userdata;
-
-    if(string_match(path, "/chosen/"))
-    {
-        if(string_match(prop_name, "linux,initrd-start"))
-        {
-            result = 1;
-            state->cpio_begin = (void *)(umm)devicetree_u32(prop);
-        }
-        else if(string_match(prop_name, "linux,initrd-end"))
-        {
-            result = 1;
-            state->cpio_end = (void *)(umm)devicetree_u32(prop);
-        }
-    }
-
-    return result;
-}
-
-static
-DEVICETREE_CALLBACK(print_devicetree)
-{
-    print_string(path);
-    print_string(" - ");
-    print_string(prop_name);
-    print_string("\r\n");
-
-    for(um32 index = 0; index < prop_size; ++index)
-    {
-        c8 c = ((c8 *)prop)[index];
-        if(32 <= c && c <= 126)
-        {
-            print_char(c);
-        }
-        else
-        {
-            switch(c)
-            {
-                case '\0': { print_string("\\0"); } break;
-                case '\r': { print_string("\\r"); } break;
-                case '\n': { print_string("\\n"); } break;
-                case '\\': { print_string("\\\\"); } break;
-                default:
-                {
-                    static c8 hex_digits[16] =
-                    {
-                        '0', '1', '2', '3', '4', '5', '6', '7',
-                        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
-                    };
-
-                    c8 byte[5] =
-                    {
-                        '\\', 'x',
-                        hex_digits[(c >> 4) & 15],
-                        hex_digits[(c >> 0) & 15],
-                        '\0'
-                    };
-                    print_string(byte);
-                } break;
-            }
-        }
-    }
-    print_string("\r\n");
-    return 0;
-}
-
-static
 KERNEL_TIMER_CALLBACK(timer_print_string)
 {
     PrintStringTask *task = (PrintStringTask *)userdata;
@@ -368,30 +295,86 @@ irq_init(void)
 }
 
 static void
-init_kernel_state(KernelState *state, void *devicetree_addr)
+print_devicetree(void *devicetree_handle)
 {
-    g_kernel_state.devicetree_begin = devicetree_addr;
-    g_kernel_state.devicetree_end = devicetree_addr + devicetree_get_total_size(devicetree_addr);
-
-    u32 total_device_addr_count = (&state->last_device_addr - &state->first_device_addr + 1);
-    if(devicetree_traverse(devicetree_addr, init_kernel_addr_range, &g_kernel_state) !=
-       total_device_addr_count)
+    for(DevicetreeIter iter = iterate_devicetree(devicetree_handle);
+        is_devicetree_iter_valid(&iter);
+        advance_devicetree_iter(&iter))
     {
-        invalid_code_path;
+        print_string(iter.dir);
+        print_string(" - ");
+        print_string(iter.prop);
+        print_string("\r\n");
+        for(um32 offset = 0; offset < iter.size; ++offset)
+        {
+            c8 c = (c8)iter.data[offset];
+            if(32 <= c && c <= 126)
+            {
+                print_char(c);
+            }
+            else
+            {
+                switch(c)
+                {
+                    case '\0': { print_string("\\0"); } break;
+                    case '\r': { print_string("\\r"); } break;
+                    case '\n': { print_string("\\n"); } break;
+                    case '\\': { print_string("\\\\"); } break;
+                    default:
+                    {
+                        static c8 digits[16] =
+                        {
+                            '0', '1', '2', '3', '4', '5', '6', '7',
+                            '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+                        };
+                        
+                        c8 text[5] = { '\\', 'x', digits[(c >> 4) & 15], digits[c & 15], '\0' };
+                        print_string(text);
+                    } break;
+                }
+            }
+        }
+        print_string("\r\n");
     }
+}
 
+static void
+init_kernel_state(KernelState *state, void *devicetree_handle)
+{
+    DeviceRegionList device_region_list;
+    query_device_region_list(&device_region_list, devicetree_handle);
+    
+    umm boot_arena_size = PAGE_MAX_ALLOC_SIZE;
+    void *boot_arena_begin = (void *)0x10000000;
+    void *boot_arena_end = (void *)((umm)boot_arena_begin + boot_arena_size);
+    BootArena *boot_arena = bootstrap_boot_arena(boot_arena_begin, boot_arena_end);
+    
+    MemoryRegionList *region_list = push_size(boot_arena, sizeof(*region_list));
+    init_memory_region_list(region_list, (void *)0x00000000, (void *)0x3c000000);
+    reserve_memory_region(region_list,
+                          device_region_list.spin_table_begin, device_region_list.spin_table_end);
+    reserve_memory_region(region_list,
+                          device_region_list.devicetree_begin, device_region_list.devicetree_end);
+    reserve_memory_region(region_list, device_region_list.cpio_begin, device_region_list.cpio_end);
+    reserve_memory_region(region_list, &kernel_image_begin, &kernel_image_end);
+    reserve_memory_region(region_list, boot_arena_begin, boot_arena_end);
+    
+    init_page_pool(&state->page_pool, region_list);
+    init_memory_allocator(&state->allocator, &state->page_pool);
+    
     for(u32 index = 1; index < KERNEL_MAX_TIMER; ++index)
     {
         Timer *timer = state->timers + index;
         timer->next_free = index - 1;
     }
     state->first_free_timer = KERNEL_MAX_TIMER - 1;
-
+    
     for(u32 index = 1; index < KERNEL_MAX_INTERRUPT; ++index)
     {
         InterruptContext *interrupt = state->interrupts + index;
         interrupt->next_free = index - 1;
     }
+    
 }
 
 static void
@@ -403,6 +386,20 @@ enable_simd_instruction(void)
     __asm__ volatile ("msr cpacr_el1, %0" :: "r"(cpacr_el1));
 }
 
+static THREAD_PROC(foo_thread_proc)
+{
+    for(s32 index = 0; index < 10; ++index)
+    {
+        print_string("Thread id: ");
+        print_u64(get_current_thread()->id);
+        print_string(" ");
+        print_u64(index);
+        wait_cycle(1000000);
+        schedule();
+    }
+    return 0;
+}
+
 void
 kernel_main(void *devicetree_addr)
 {
@@ -412,31 +409,20 @@ kernel_main(void *devicetree_addr)
     init_timer_for_core_0();
 
     init_kernel_state(&g_kernel_state, devicetree_addr);
-    // devicetree_traverse(devicetree_addr, print_devicetree, 0);
+    print_devicetree(devicetree_addr);
 
-    umm boot_arena_size = PAGE_MAX_ALLOC_SIZE;
-    void *boot_arena_begin = (void *)0x10000000;
-    void *boot_arena_end = (void *)((umm)boot_arena_begin + boot_arena_size);
-    BootArena *boot_arena = bootstrap_boot_arena(boot_arena_begin, boot_arena_end);
-
-    void *spin_table_begin = (void *)0x0000;
-    void *spin_table_end = (void *)0x1000;
-
-    MemoryRegionList *region_list = push_size(boot_arena, sizeof(*region_list));
-    init_memory_region_list(region_list, (void *)0x00000000, (void *)0x3c000000);
-    reserve_memory_region(region_list, spin_table_begin, spin_table_end);
-    reserve_memory_region(region_list, &kernel_image_begin, &kernel_image_end);
-    reserve_memory_region(region_list,
-                          g_kernel_state.devicetree_begin, g_kernel_state.devicetree_end);
-    reserve_memory_region(region_list, g_kernel_state.cpio_begin, g_kernel_state.cpio_end);
-    reserve_memory_region(region_list, boot_arena_begin, boot_arena_end);
-
-    PagePool page_pool;
-    init_page_pool(&page_pool, region_list);
-
-    MemoryAllocator allocator;
-    init_memory_allocator(&allocator, &page_pool);
-
+    for(u32 index = 0; index < 3; ++index)
+    {
+        create_thread(foo_thread_proc, 0);
+    }
+    
+    Thread *thread = create_empty_thread();
+    set_current_thread(thread);
+    
+    
+    idle_thread_proc(0);
+    
+    
 
     // add_timer(0, timer_tell_time, 0);
     print_string("Hello, Sailor!\r\n");
@@ -528,7 +514,7 @@ kernel_main(void *devicetree_addr)
             if(token_count == 2)
             {
                 umm size = parse_u64(next_token(token));
-                void *ptr = alloc_memory(&allocator, size);
+                void *ptr = alloc_memory(&g_kernel_state.allocator, size);
                 // print_hex64((umm)ptr);
                 // print_string("\r\n");
             }
@@ -543,7 +529,7 @@ kernel_main(void *devicetree_addr)
             if(token_count == 2)
             {
                 void *ptr = (void *)parse_hex64(next_token(token));
-                free_memory(&allocator, ptr);
+                free_memory(&g_kernel_state.allocator, ptr);
             }
             else
             {
@@ -565,9 +551,9 @@ kernel_main(void *devicetree_addr)
                 u64 expiration = seconds * get_timer_frequency();
 
                 um32 len = string_len(message);
-                PrintStringTask *task = alloc_memory(&allocator, sizeof(*task));
-                task->allocator = &allocator;
-                task->string = (c8 *)alloc_memory(&allocator, len + 1);
+                PrintStringTask *task = alloc_memory(&g_kernel_state.allocator, sizeof(*task));
+                task->allocator = &g_kernel_state.allocator;
+                task->string = (c8 *)alloc_memory(&g_kernel_state.allocator, len + 1);
                 copy_memory(task->string, message, len + 1);
 
                 add_timer(expiration, timer_print_string, task);
