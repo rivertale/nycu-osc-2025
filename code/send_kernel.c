@@ -84,7 +84,7 @@ write_serial_device(int file, void *buffer, umm size)
         if(byte_written == -1)
             fatal_error("write() failed");
 
-        usleep(300);
+        usleep(200);
         cur += byte_written;
         size -= byte_written;
     }

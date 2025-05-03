@@ -1,4 +1,11 @@
 static void
+enable_simd_instruction(void)
+{
+    u64 cpacr_el1 = read_cpacr_el1() | (3 << 20);
+    write_cpacr_el1(cpacr_el1);
+}
+
+static void
 watchdog_reboot(s32 tick)
 {
     *(vu32 *)PM_RSTC = PM_PASSWORD | PM_RSTC_WRCFG_FULL_RESET;
@@ -11,23 +18,23 @@ watchdog_cancel_reboot(void)
     *(vu32 *)PM_RSTC = PM_PASSWORD | 0;
     *(vu32 *)PM_WDOG = PM_PASSWORD | 0;
 }
+
 static b32
-mailbox_query(u32 *message)
+mailbox_query(u8 channel, u32 *message)
 {
     b32 result = 0;
-    u32 channel = 8;
     u32 channel_mask = 0xf;
     u32 mailbox = ((u32)(umm)message & ~channel_mask) | channel;
     while(*(vu32 *)MAILBOX_STATUS & MAILBOX_FULL)
         do_nothing;
     *(vu32 *)MAILBOX_WRITE = mailbox;
-    
+
     while(*(vu32 *)MAILBOX_STATUS & MAILBOX_EMPTY)
         do_nothing;
-    
+
     if(*(vu32 *)MAILBOX_READ == mailbox)
         result = (message[1] == MAILBOX_RESPONSE_SUCCESS);
-    
+
     return result;
 }
 
@@ -37,7 +44,7 @@ query_board_revision(void)
     // reference
     // https://jsandler18.github.io/extra/prop-channel.html
     // https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
-    
+
     u32 result = 0;
     __attribute__((aligned(16))) u32 message[7];
     message[0] = sizeof(message);
@@ -47,8 +54,8 @@ query_board_revision(void)
     message[4] = MAILBOX_TAG_REQUEST;
     message[5] = 0; // response buffer
     message[6] = MAILBOX_TAG_END;
-    
-    if(mailbox_query(message))
+
+    if(mailbox_query(8, message))
         result = message[5];
     return result;
 }
@@ -66,8 +73,8 @@ query_arm_memory_info(void)
     message[5] = 0; // response buffer
     message[6] = 0; // response buffer
     message[7] = MAILBOX_TAG_END;
-    
-    if(mailbox_query(message))
+
+    if(mailbox_query(8, message))
     {
         result.base = message[5];
         result.size = message[6];
@@ -89,18 +96,18 @@ advance_devicetree_iter(DevicetreeIter *iter)
     {
         u32 tag = devicetree_u32(iter->cur);
         iter->cur += sizeof(u32);
-        
+
         if(tag == FDT_BEGIN_NODE)
         {
             c8 *name = (c8 *)iter->cur;
             um32 name_len = string_len(name);
-            
+
             assert(iter->dir_len + name_len + 1 < DEVICETREE_MAX_DIR_LEN);
             copy_memory(iter->dir + iter->dir_len, name, name_len);
             iter->dir[iter->dir_len + name_len + 0] = '/';
             iter->dir[iter->dir_len + name_len + 1] = '\0';
             iter->dir_len += name_len + 1;
-            
+
             ++iter->depth;
             iter->cur += align_up(name_len + 1, 4);
         }
@@ -120,7 +127,7 @@ advance_devicetree_iter(DevicetreeIter *iter)
             iter->size = devicetree_u32(iter->cur);
             iter->prop = iter->strings_block + name_offset;
             iter->data = iter->cur + sizeof(u32) * 2;
-            
+
             iter->cur += sizeof(u32) * 2 + align_up(iter->size, 4);
             break;
         }
@@ -147,7 +154,7 @@ iterate_devicetree(void *handle)
 {
     DevicetreeIter iter;
     clear_memory(&iter, sizeof(iter));
-    
+
     FdtHeader *header = (FdtHeader *)handle;
     u32 magic = devicetree_u32(&header->magic);
     if(magic == 0xd00dfeed)
@@ -171,7 +178,7 @@ cpio_parse_hex_digit(c8 digit)
         result = digit - 'A' + 10;
     else if('a' <= digit && digit <= 'f')
         result = digit - 'a' + 10;
-    
+
     return result;
 }
 
@@ -179,7 +186,7 @@ static s32
 cpio_parse_newc_int(c8 *buffer)
 {
     s32 result = -1;
-    
+
     s8 digits[8];
     digits[0] = cpio_parse_hex_digit(buffer[0]);
     digits[1] = cpio_parse_hex_digit(buffer[1]);
@@ -189,7 +196,7 @@ cpio_parse_newc_int(c8 *buffer)
     digits[5] = cpio_parse_hex_digit(buffer[5]);
     digits[6] = cpio_parse_hex_digit(buffer[6]);
     digits[7] = cpio_parse_hex_digit(buffer[7]);
-    
+
     if((digits[0] | digits[1] | digits[2] | digits[3] |
         digits[4] | digits[5] | digits[6] | digits[7]) != -1)
     {
@@ -215,7 +222,7 @@ static b32
 cpio_is_sentinel(void *handle)
 {
     b32 result = 0;
-    
+
     CpioNewcHeader *header = (CpioNewcHeader *)handle;
     u32 sentinel_len = sizeof(CPIO_SENTINEL_FILE) - 1;
     if(cpio_parse_newc_int(header->namesize) == sizeof(CPIO_SENTINEL_FILE))
@@ -232,12 +239,12 @@ cpio_next_file(void *handle)
     CpioNewcHeader *header = (CpioNewcHeader *)handle;
     u32 name_size = cpio_parse_newc_int(header->namesize);
     u32 file_size = cpio_parse_newc_int(header->filesize);
-    
+
     void *result = (void *)((u8 *)header + align_up(sizeof(*header) + name_size, 4) +
                             align_up(file_size, 4));
     if(!cpio_is_valid(result) || cpio_is_sentinel(result))
         result = 0;
-    
+
     return result;
 }
 
@@ -247,7 +254,7 @@ cpio_find_first_file(void)
     void *handle = g_kernel_state.cpio_handle;
     if(!cpio_is_valid(handle) || cpio_is_sentinel(handle))
         handle = 0;
-    
+
     return handle;
 }
 
@@ -256,7 +263,7 @@ cpio_get_file_name(void *handle, um32 *out_len)
 {
     CpioNewcHeader *header = (CpioNewcHeader *)handle;
     u32 name_size = cpio_parse_newc_int(header->namesize);
-    
+
     c8 *result = (c8 *)header + sizeof(*header);
     if(out_len)
         *out_len = name_size;
@@ -269,7 +276,7 @@ cpio_get_file_content(void *handle, um32 *out_len)
     CpioNewcHeader *header = (CpioNewcHeader *)handle;
     u32 name_size = cpio_parse_newc_int(header->namesize);
     u32 file_size = cpio_parse_newc_int(header->filesize);
-    
+
     u8 *result = (u8 *)header + align_up(sizeof(*header) + name_size, 4);
     if(out_len)
         *out_len = file_size;
@@ -280,15 +287,15 @@ static void *
 cpio_find_file(c8 *file_name)
 {
     void *result = 0;
-    
+
     umm len = string_len(file_name);
     for(void *handle = cpio_find_first_file();
         handle;
         handle = cpio_next_file(handle))
     {
-        um32 this_len;
-        c8 *this_name = cpio_get_file_name(handle, &this_len);
-        if(string_match(this_name, file_name))
+        um32 it_name_len;
+        c8 *it_name = cpio_get_file_name(handle, &it_name_len);
+        if(string_match(it_name, file_name))
         {
             result = handle;
             break;
@@ -321,7 +328,7 @@ query_device_region_list(DeviceRegionList *list, void *devicetree_handle)
             }
         }
     }
-    
+
     // ensure every address is initialized
     for(void **addr = (void **)list; addr < (void **)(list + 1); ++addr)
     {

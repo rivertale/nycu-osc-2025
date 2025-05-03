@@ -1,63 +1,34 @@
-#define THREAD_PROC(name) void *name(void *userdata)
-typedef THREAD_PROC(ThreadProc);
+void switch_context(u64 *next_kernel_sp, u64 *kernel_sp);
+void user_space_thread_cleanup(ExitCode exit_code);
+void handle_signal(TrapFrame *trap_frame);
+void kernel_space_thread_startup(void);
+static ExitCode launch_kernel_shell(void *userdata);
 
-Thread *get_current_thread(void);
-void set_current_thread(Thread *thread);
-
-static void
-switch_thread(Thread *next_thread, Thread *thread)
+static inline Thread *
+get_current_thread(void)
 {
-    
+    return (Thread *)read_tpidr_el1();
 }
 
-static void
-exit_thread(void *exit_code)
+static inline void
+set_current_thread(Thread *thread)
 {
-}
-
-static Thread *
-create_empty_thread(void)
-{
-    KernelState *state = &g_kernel_state;
-    MemoryAllocator *allocator = &state->allocator;
-    
-    Thread *result = alloc_memory(allocator, sizeof(*result));
-    result->id = ++state->prev_created_thread_id;
-    return result;
-}
-
-static ThreadId
-create_thread(ThreadProc *proc, void *userdata)
-{
-    KernelState *state = &g_kernel_state;
-    Scheduler *scheduler = &state->scheduler;
-    MemoryAllocator *allocator = &state->allocator;
-    
-    um32 stack_size = kilobytes(64);
-    u8 *stack = alloc_memory(allocator, stack_size);
-    
-    Thread *thread = create_empty_thread();
-    thread->saved_regs[SavedReg_sp] = (umm)(stack + stack_size);
-    // thread->saved_regs[SavedReg_x0] = userdata;
-    thread->saved_regs[SavedReg_lr] = (umm)proc;
-    thread->priority = 1;
-    double_link_insert_at_last(&scheduler->ready_link[thread->priority], &thread->link);
-    return thread->id;
+    write_tpidr_el1((umm)thread);
 }
 
 static Thread *
-get_next_ready_thread(void)
+get_next_ready_thread(s32 min_priority)
 {
     Thread *result = 0;
-    
+
     KernelState *state = &g_kernel_state;
     Scheduler *scheduler = &state->scheduler;
-    for(s32 priority = MAX_SCHEDULE_PRIORITY; priority >= 0; --priority)
+    for(s32 priority = ThreadPriority_one_past_last - 1; priority >= min_priority; --priority)
     {
         if(!double_link_is_empty(&scheduler->ready_link[priority]))
         {
             result = (Thread *)scheduler->ready_link[priority].next;
-            double_link_remove(&result->link);
+            double_link_remove(&result->schedule_link);
             break;
         }
     }
@@ -65,20 +36,111 @@ get_next_ready_thread(void)
 }
 
 static void
-schedule(void)
+schedule_thread(Thread *thread)
 {
-    Thread *next_thread = get_next_ready_thread();
+    KernelState *state = &g_kernel_state;
+    Scheduler *scheduler = &state->scheduler;
+
+    double_link_insert_at_last(&scheduler->ready_link[thread->priority], &thread->schedule_link);
+}
+
+static void
+yield_physical_thread()
+{
+    Thread *thread = get_current_thread();
+
+    ThreadPriority min_priority = (thread->status == ThreadStatus_exited) ?
+                                  ThreadPriority_idle : thread->priority;
+    Thread *next_thread = get_next_ready_thread(min_priority);
     if(next_thread)
     {
-        Thread *thread = get_current_thread();
-        switch_thread(next_thread, thread);
+        if(thread->status != ThreadStatus_exited)
+            schedule_thread(thread);
+
+        switch_context(&next_thread->kernel_sp, &thread->kernel_sp);
     }
 }
 
-static THREAD_PROC(idle_thread_proc)
+static void
+exit_thread(Thread *thread, ExitCode exit_code)
+{
+    assert(thread);
+    thread->status = ThreadStatus_exited;
+}
+
+static Thread *
+create_empty_thread(Process *process)
+{
+    KernelState *state = &g_kernel_state;
+    MemoryAllocator *allocator = &state->allocator;
+
+    Thread *thread = alloc_memory(allocator, sizeof(*thread));
+    thread->id = ++state->prev_created_thread_id;
+    thread->process = process;
+    double_link_insert_at_last(&process->thread_link, &thread->thread_link);
+    return thread;
+}
+
+static Thread *
+create_thread(Process *process, ThreadProc *proc, void *param, s32 priority,
+              um32 user_stack_size, um32 kernel_stack_size, u32 flags)
+{
+    KernelState *state = &g_kernel_state;
+    MemoryAllocator *allocator = &state->allocator;
+
+    Thread *thread = create_empty_thread(process);
+    thread->user_stack_size = user_stack_size;
+    thread->user_stack_addr = (umm)alloc_memory(allocator, user_stack_size);
+    thread->kernel_stack_size = kernel_stack_size;
+    thread->kernel_stack_addr = (umm)alloc_memory(allocator, kernel_stack_size);
+    thread->kernel_sp = thread->kernel_stack_addr + kernel_stack_size;
+    thread->priority = priority;
+
+    thread->kernel_sp -= sizeof(TrapFrame);
+    TrapFrame *trap_frame = (TrapFrame *)thread->kernel_sp;
+    trap_frame->lr = (umm)user_space_thread_cleanup;
+    trap_frame->spsr_el1 = (flags & CreateThread_kernel) ?
+                           KERNEL_THREAD_DEFAULT_PSTATE : USER_THREAD_DEFAULT_PSTATE;
+    trap_frame->elr_el1 = (umm)proc;
+    trap_frame->sp_el0 = thread->user_stack_addr + user_stack_size;
+    trap_frame->x0 = (umm)param;
+
+    thread->kernel_sp -= sizeof(SwitchFrame);
+    SwitchFrame *switch_frame = (SwitchFrame *)thread->kernel_sp;
+    switch_frame->lr = (umm)kernel_space_thread_startup;
+    switch_frame->tpidr_el1 = (umm)thread;
+
+    schedule_thread(thread);
+    return thread;
+}
+
+static
+TIMER_CALLBACK(reschedule_timer_callback)
+{
+    u64 freq = get_timer_frequency();
+    add_timer(freq >> 5, reschedule_timer_callback, 0);
+}
+
+static
+THREAD_PROC(idle_thread_proc)
 {
     for(;;)
     {
-        schedule();
+        Thread *thread = get_current_thread();
+        create_thread(thread->process, launch_kernel_shell, 0, ThreadPriority_normal,
+                      kilobytes(16), kilobytes(16), CreateThread_kernel);
+        yield_physical_thread();
     }
+}
+
+static void
+init_scheduler(Scheduler *scheduler)
+{
+    clear_memory(scheduler, sizeof(*scheduler));
+    for(s32 priority = ThreadPriority_idle; priority < ThreadPriority_one_past_last; ++priority)
+    {
+        double_link_init(&scheduler->ready_link[priority]);
+    }
+
+    reschedule_timer_callback(0);
 }

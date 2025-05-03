@@ -1,50 +1,52 @@
 static inline void
 init_timer_for_core_0(void)
 {
-    __asm__ volatile("mov x0, 2\n"
-                     "ldr x1, =%0\n"
-                     "str w0, [x1]\n"
-                     :: "i"(IRQ_CORE0_TIMER_CTRL));
+    *(vu32 *)IRQ_CORE0_TIMER_CTRL = 2;
+}
+
+static inline void
+enable_timer_access_for_el0(void)
+{
+    u64 reg = read_cntkctl_el1();
+    write_cntkctl_el1(reg | 0x1);
 }
 
 static inline void
 enable_timer(void)
 {
-    __asm__ volatile("mov x0, 1\n"
-                     "msr cntp_ctl_el0, x0\n");
+    u64 reg = read_cntp_ctl_el0();
+    write_cntp_ctl_el0(reg | 0x1);
 }
 
 static inline void
 disable_timer(void)
 {
-    __asm__ volatile("mov x0, 0\n"
-                     "msr cntp_ctl_el0, x0\n");
+    u64 reg = read_cntp_ctl_el0();
+    write_cntp_ctl_el0(reg & ~0x1);
 }
 
 static inline void
 set_timer_expiration(u64 tick)
 {
-    __asm__ volatile("msr cntp_cval_el0, %0" :: "r"(tick));
+    write_cntp_cval_el0(tick);
 }
 
 static inline u64
 get_timer_frequency(void)
 {
-    u64 result = 0;
-    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(result));
+    u64 result = read_cntfrq_el0();
     return result;
 }
 
 static inline u64
 get_timer_current_tick(void)
 {
-    u64 result = 0;
-    __asm__ volatile ("mrs %0, cntpct_el0" : "=r"(result));
+    u64 result = read_cntpct_el0();
     return result;
 }
 
 static b32
-add_timer(u64 expiration, KernelTimerCallback *callback, void *userdata)
+add_timer(u64 expiration, TimerCallback *callback, void *userdata)
 {
     b32 result = 0;
 

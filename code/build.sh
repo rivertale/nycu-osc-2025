@@ -15,28 +15,28 @@ image_flags="--output-target=aarch64-rpi3-elf -O binary"
 echo "Compiling bootloader..."
 clang-18 ${compile_flags} ${code_dir}/bootloader.S -o bootloader_asm.o
 clang-18 ${compile_flags} ${code_dir}/bootloader.c -o bootloader.o
-ld.lld-18 ${link_flags} -T ${code_dir}/bootloader.ld -o bootloader.elf bootloader_asm.o bootloader.o
+ld.lld-18 ${link_flags} -T ${code_dir}/bootloader.ld bootloader_asm.o bootloader.o -o bootloader.elf
 llvm-objcopy-18 ${image_flags} bootloader.elf bootloader.img
 
 echo "Compiling kernel..."
 clang-18 ${compile_flags} ${code_dir}/kernel.S -o kernel_asm.o
 clang-18 ${compile_flags} ${code_dir}/kernel.c -o kernel.o
-ld.lld-18 ${link_flags} -T ${code_dir}/kernel.ld -o kernel.elf kernel_asm.o kernel.o
+ld.lld-18 ${link_flags} -T ${code_dir}/kernel.ld kernel_asm.o kernel.o -o kernel.elf
 llvm-objcopy-18 ${image_flags} kernel.elf kernel.img
 
 echo "Compiling user programs..."
 clang-18 ${compile_flags} ${code_dir}/user_exception.S
-ld.lld-18 ${link_flags} -o user_exception.elf user_exception.o
+ld.lld-18 ${link_flags} user_exception.o -o user_exception.elf
 llvm-objcopy-18 ${image_flags} user_exception.elf user_exception.img
 
 echo "Compiling tools..."
 clang-18 -g -o send_kernel ${code_dir}/send_kernel.c
-clang-18 -g -o cal ${code_dir}/cal.c
 
 echo "Building initial file system..."
 cd ${data_dir}/initramfs
+cp ${build_dir}/user_shell.img ./
 cp ${build_dir}/user_exception.img ./
-find . | cpio -o -H newc > ${build_dir}/initramfs.cpio 2> /dev/null
+# find . | cpio -o -H newc > ${build_dir}/initramfs.cpio 2> /dev/null
 cd ${build_dir}
 
 rm *.o

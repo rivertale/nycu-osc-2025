@@ -60,6 +60,32 @@ mini_uart_write_u64(u64 value)
 }
 
 static void
+mini_uart_write_hex64(u64 value)
+{
+    static c8 hex_digit[16] =
+    {
+        '0', '1', '2', '3', '4', '5', '6', '7',
+        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+    };
+
+    c8 digits[] =
+    {
+        '0', 'x',
+        hex_digit[(value >> 28) & 0xf],
+        hex_digit[(value >> 24) & 0xf],
+        hex_digit[(value >> 20) & 0xf],
+        hex_digit[(value >> 16) & 0xf],
+        hex_digit[(value >> 12) & 0xf],
+        hex_digit[(value >> 8) & 0xf],
+        hex_digit[(value >> 4) & 0xf],
+        hex_digit[(value >> 0) & 0xf],
+        '\0'
+    };
+
+    for(c8 *c = digits; *c; ++c)
+        mini_uart_write_byte(*c);
+}
+static void
 mini_uart_enable_read_interrupt(void)
 {
     *(vu32 *)AUX_MU_IER_REG |= AUX_MU_IER_RECEIVE_ENABLED;

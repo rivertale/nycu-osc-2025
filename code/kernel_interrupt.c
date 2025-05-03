@@ -27,7 +27,7 @@ add_interrupt(InterruptKind kind)
 }
 
 static void
-handle_irq_interrupt(void)
+handle_irq_interrupt(TrapFrame *trap_frame)
 {
     // TODO: accept new interrupt in handler
     KernelState *state = &g_kernel_state;
@@ -97,21 +97,29 @@ handle_irq_interrupt(void)
         {
             disable_timer();
         }
+
+        yield_physical_thread();
     }
 }
 
 void
-interrupt_handler_el1_cur_sync(void)
+handle_interrupt_el1_cur_irq(TrapFrame *trap_frame)
 {
-    u64 spsr_el1 = 0;
-    u64 elr_el1 = 0;
-    u64 esr_el1 = 0;
+    handle_irq_interrupt(trap_frame);
+}
 
-    __asm__ volatile("mrs %0, spsr_el1\n"
-                     "mrs %1, elr_el1\n"
-                     "mrs %2, esr_el1\n"
-                     : "=r"(spsr_el1), "=r"(elr_el1), "=r"(esr_el1));
+void
+handle_interrupt_el1_low_irq(TrapFrame *trap_frame)
+{
+    handle_irq_interrupt(trap_frame);
+}
 
+void
+handle_interrupt_el1_cur_sync(TrapFrame *trap_frame)
+{
+    u64 spsr_el1 = read_spsr_el1();
+    u64 elr_el1 = read_elr_el1();
+    u64 esr_el1 = read_esr_el1();
     u32 iss = (esr_el1 >> 0) & 0x1ffffff;
     u32 il = (esr_el1 >> 25) & 0x1;
     u32 ec = (esr_el1 >> 26) & 0x3f;
@@ -142,44 +150,55 @@ interrupt_handler_el1_cur_sync(void)
 }
 
 void
-interrupt_handler_el1_cur_irq(void)
+handle_interrupt_el1_low_sync(TrapFrame *trap_frame)
 {
-    handle_irq_interrupt();
+    u64 spsr_el1 = read_spsr_el1();
+    u64 elr_el1 = read_elr_el1();
+    u64 esr_el1 = read_esr_el1();
+    u32 ec = (esr_el1 >> 26) & 0x3f;
+    switch(ec)
+    {
+        case 0x15:
+        {
+            enable_irq_interrupt();
+            handle_syscall(trap_frame);
+            disable_irq_interrupt();
+        } break;
+        default:
+        {
+            u32 iss = (esr_el1 >> 0) & 0x1ffffff;
+            u32 il = (esr_el1 >> 25) & 0x1;
+            u32 ec = (esr_el1 >> 26) & 0x3f;
+            u32 iss2 = (esr_el1 >> 32) & 0x7ffffff;
+            u32 res0 = (esr_el1 >> 56) & 0xff;
+
+            print_string("spsr_el1=");
+            print_hex64(spsr_el1);
+            print_string("\r\n");
+            print_string("elr_el1=");
+            print_hex64(elr_el1);
+            print_string("\r\n");
+            print_string("esr_el1.iss=");
+            print_hex64(iss);
+            print_string("\r\n");
+            print_string("esr_el1.il=");
+            print_hex64(il);
+            print_string("\r\n");
+            print_string("esr_el1.ec=");
+            print_hex64(ec);
+            print_string("\r\n");
+            print_string("esr_el1.iss2=");
+            print_hex64(iss2);
+            print_string("\r\n");
+            print_string("esr_el1.res0=");
+            print_hex64(res0);
+            print_string("\r\n");
+        } break;
+    }
 }
 
 void
-interrupt_handler_el1_low_sync(void)
-{
-    __asm__ volatile("msr DAIFSet, 0xf");
-    u64 spsr_el1 = 0;
-    u64 elr_el1 = 0;
-    u64 esr_el1 = 0;
-
-    __asm__ volatile("mrs %0, spsr_el1\n"
-                     "mrs %1, elr_el1\n"
-                     "mrs %2, esr_el1\n"
-                     : "=r"(spsr_el1), "=r"(elr_el1), "=r"(esr_el1));
-
-    print_string("WW\r\n");
-    print_string("spsr_el1=");
-    print_hex64(spsr_el1);
-    print_string("\r\n");
-    print_string("elr_el1=");
-    print_hex64(elr_el1);
-    print_string("\r\n");
-    print_string("esr_el1=");
-    print_hex64(esr_el1);
-    print_string("\r\n");
-}
-
-void
-interrupt_handler_el1_low_irq(void)
-{
-    handle_irq_interrupt();
-}
-
-void
-interrupt_handler_default(void)
+handle_interrupt_default(void)
 {
     print_string("unknown interrupt\r\n");
 }

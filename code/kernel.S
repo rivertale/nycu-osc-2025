@@ -1,8 +1,7 @@
 #include "kernel_interrupt.S"
-#include "kernel_scheduler.S"
 
 .section ".text.boot"
-.globl _start
+.global _start
 _start:
     // store devicetree addr
     mov x4, x0

@@ -53,11 +53,11 @@ typedef struct FdtHeader
     u32 size_dt_struct;
 } FdtHeader;
 
-typedef struct ArmMemoryInfo
+typedef struct  __attribute__((aligned(8))) ArmMemoryInfo
 {
     u32 base;
     u32 size;
-} __attribute__((aligned(8))) ArmMemoryInfo;
+} ArmMemoryInfo;
 
 typedef struct DevicetreeIter
 {
@@ -66,7 +66,7 @@ typedef struct DevicetreeIter
     u8 *data;
     u32 size;
     s32 depth;
-    
+
     u32 dir_len;
     c8 *strings_block;
     c8 dir[DEVICETREE_MAX_DIR_LEN];
@@ -88,7 +88,7 @@ typedef struct CpioNewcHeader
     c8 rdevminor[8];
     c8 namesize[8]; // including null-terminator
     c8 check[8];
-    
+
     // c8[] null-terminated filename
     // pad to 2-byte boundary
     // u8[] file content

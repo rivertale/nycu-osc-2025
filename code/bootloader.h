@@ -2,6 +2,7 @@
 #define BOOTLOADER_H
 
 #include "common.h"
+#include "intrinsic.h"
 #include "peripheral.h"
 #include "uart.h"
 

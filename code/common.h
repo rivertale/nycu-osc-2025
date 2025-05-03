@@ -15,19 +15,20 @@ typedef double f64;
 typedef int b32;
 typedef u32 um32;
 typedef u64 umm;
-
 typedef volatile u32 vu32;
 
 #define do_nothing (void)0
 #define array_count(array) (sizeof(array) / sizeof(array[0]))
-#define wait_cycle(delay) for(u32 i = 0; i < delay; ++i) __asm__ volatile("nop")
+#define offset_of(Type, field) ((umm)(&((Type *)0)->field))
+#define ptr_from_field(ptr, Type, field) ((Type *)((u8 *)(ptr) - offset_of(Type, field)))
+
 #define kilobytes(value) ((value) << 10)
 #define megabytes(value) (kilobytes(value) << 10)
 #define gigabytes(value) ((u64)megabytes(value) << 10)
 
 #define debug_log(log) debug_log1(log, __FILE__, __LINE__)
-#define debug_log1(log, file, line) debug_log2(log, file, #line)
-#define debug_log2(log, file, line) mini_uart_write_const("[DEBUG] " file "(" line "): " log);
+#define debug_log1(log, file, line) debug_log2(log, file, line)
+#define debug_log2(log, file, line) mini_uart_write_const("[DEBUG] " file "(" #line "): " log);
 
 #define mini_uart_write_const(array) \
 mini_uart_write(array, (array_count(array) - 1) * sizeof(array[0]))
@@ -47,35 +48,36 @@ do \
     } \
 } while(0)
 
-static s32
-count_leading_zeros(u64 value)
-{
-    s64 result = 0;
-    __asm__ volatile ("clz %0, %1" : "=r"(result) : "r"(value));
-    return result;
-}
+#define double_link_insert_at_last(sentinel, link) \
+do \
+{ \
+(link)->prev = (sentinel)->prev; \
+(link)->next = (sentinel); \
+(sentinel)->prev->next = (link); \
+(sentinel)->prev = (link); \
+} while(0)
 
-static s32
-count_trailing_zeros(u64 value)
-{
-    s64 result = 0;
-    __asm__ volatile ("rbit %0, %0\n"
-                      "clz %1, %0\n"
-                      : "=r"(result) : "r"(value));
-    return result;
-}
+#define double_link_remove(link) \
+do \
+{ \
+(link)->prev->next = (link)->next; \
+(link)->next->prev = (link)->prev; \
+} while(0)
 
-static s32
-find_most_significant_bit(u64 value)
-{
-    return 63 - count_leading_zeros(value);
-}
+#define double_link_init(sentinel) \
+do \
+{ \
+(sentinel)->prev = (sentinel); \
+(sentinel)->next = (sentinel); \
+} while(0)
 
-static s32
-find_least_significant_bit(u64 value)
+#define double_link_is_empty(link) ((link)->next == (link))
+
+typedef struct Link
 {
-    return count_trailing_zeros(value);
-}
+    struct Link *prev;
+    struct Link *next;
+} Link;
 
 static u64
 next_power_of_two(u64 value)

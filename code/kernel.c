@@ -7,51 +7,14 @@ static void print_string(c8 *message);
 static void print_hex32(u32 value);
 static void print_hex64(u64 value);
 static void print_u64(u64 value);
+#include "kernel_user.c"
 #include "kernel_timer.c"
-#include "kernel_interrupt.c"
 #include "kernel_memory.c"
 #include "kernel_scheduler.c"
-
-static void
-read_console(void *buffer, u64 size)
-{
-    KernelState *state = &g_kernel_state;
-    mini_uart_enable_read_interrupt();
-
-    u8 *byte = (u8 *)buffer;
-    while(size > 0)
-    {
-        if(state->read_cur0 != state->read_cur1)
-        {
-            *byte++ = state->read_buffer[state->read_cur0];
-            state->read_cur0 = (state->read_cur0 + 1) & KERNEL_IO_BUFFER_MASK;
-            --size;
-        }
-    }
-
-    mini_uart_disable_read_interrupt();
-}
-
-static void
-write_console(void *buffer, u64 size)
-{
-    KernelState *state = &g_kernel_state;
-
-    u8 *byte = (u8 *)buffer;
-    while(size > 0)
-    {
-        um32 next_write_cur1 = (state->write_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
-        while(size > 0 && next_write_cur1 != state->write_cur0)
-        {
-            state->write_buffer[state->write_cur1] = *byte++;
-            state->write_cur1 = next_write_cur1;
-            next_write_cur1 = (state->write_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
-            --size;
-        }
-
-        mini_uart_enable_write_interrupt();
-    }
-}
+#include "kernel_process.c"
+#include "kernel_signal.c"
+#include "kernel_syscall.c"
+#include "kernel_interrupt.c"
 
 static void
 print_buffer(c8 *buffer, umm size)
@@ -204,23 +167,12 @@ scan_line(c8 *string, um32 max_len)
 }
 
 static
-KERNEL_TIMER_CALLBACK(timer_print_string)
+TIMER_CALLBACK(timer_print_string)
 {
     PrintStringTask *task = (PrintStringTask *)userdata;
     print_string(task->string);
     free_memory(task->allocator, task->string);
     free_memory(task->allocator, task);
-}
-
-static
-KERNEL_TIMER_CALLBACK(timer_tell_time)
-{
-    u64 freq = get_timer_frequency();
-    u64 expiration = 2 * freq;
-    add_timer(expiration, timer_tell_time, 0);
-    print_string("Seconds after boot: ");
-    print_u64(get_timer_current_tick() / freq);
-    print_string("\r\n");
 }
 
 static u64
@@ -327,7 +279,7 @@ print_devicetree(void *devicetree_handle)
                             '0', '1', '2', '3', '4', '5', '6', '7',
                             '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
                         };
-                        
+
                         c8 text[5] = { '\\', 'x', digits[(c >> 4) & 15], digits[c & 15], '\0' };
                         print_string(text);
                     } break;
@@ -343,12 +295,12 @@ init_kernel_state(KernelState *state, void *devicetree_handle)
 {
     DeviceRegionList device_region_list;
     query_device_region_list(&device_region_list, devicetree_handle);
-    
+
     umm boot_arena_size = PAGE_MAX_ALLOC_SIZE;
     void *boot_arena_begin = (void *)0x10000000;
     void *boot_arena_end = (void *)((umm)boot_arena_begin + boot_arena_size);
     BootArena *boot_arena = bootstrap_boot_arena(boot_arena_begin, boot_arena_end);
-    
+
     MemoryRegionList *region_list = push_size(boot_arena, sizeof(*region_list));
     init_memory_region_list(region_list, (void *)0x00000000, (void *)0x3c000000);
     reserve_memory_region(region_list,
@@ -358,73 +310,32 @@ init_kernel_state(KernelState *state, void *devicetree_handle)
     reserve_memory_region(region_list, device_region_list.cpio_begin, device_region_list.cpio_end);
     reserve_memory_region(region_list, &kernel_image_begin, &kernel_image_end);
     reserve_memory_region(region_list, boot_arena_begin, boot_arena_end);
-    
-    init_page_pool(&state->page_pool, region_list);
-    init_memory_allocator(&state->allocator, &state->page_pool);
-    
+
+    // timer
     for(u32 index = 1; index < KERNEL_MAX_TIMER; ++index)
     {
         Timer *timer = state->timers + index;
         timer->next_free = index - 1;
     }
     state->first_free_timer = KERNEL_MAX_TIMER - 1;
-    
+
+    state->cpio_handle = device_region_list.cpio_begin;
+    init_page_pool(&state->page_pool, region_list);
+    init_memory_allocator(&state->allocator, &state->page_pool);
+    init_scheduler(&state->scheduler);
+    double_link_init(&state->process_link);
+
     for(u32 index = 1; index < KERNEL_MAX_INTERRUPT; ++index)
     {
         InterruptContext *interrupt = state->interrupts + index;
         interrupt->next_free = index - 1;
     }
-    
+
 }
 
-static void
-enable_simd_instruction(void)
+static
+THREAD_PROC(launch_kernel_shell)
 {
-    u64 cpacr_el1 = 0;
-    __asm__ volatile ("mrs %0, cpacr_el1" : "=r"(cpacr_el1));
-    cpacr_el1 |= (3 << 20);
-    __asm__ volatile ("msr cpacr_el1, %0" :: "r"(cpacr_el1));
-}
-
-static THREAD_PROC(foo_thread_proc)
-{
-    for(s32 index = 0; index < 10; ++index)
-    {
-        print_string("Thread id: ");
-        print_u64(get_current_thread()->id);
-        print_string(" ");
-        print_u64(index);
-        wait_cycle(1000000);
-        schedule();
-    }
-    return 0;
-}
-
-void
-kernel_main(void *devicetree_addr)
-{
-    enable_simd_instruction();
-    irq_init();
-    mini_uart_init();
-    init_timer_for_core_0();
-
-    init_kernel_state(&g_kernel_state, devicetree_addr);
-    print_devicetree(devicetree_addr);
-
-    for(u32 index = 0; index < 3; ++index)
-    {
-        create_thread(foo_thread_proc, 0);
-    }
-    
-    Thread *thread = create_empty_thread();
-    set_current_thread(thread);
-    
-    
-    idle_thread_proc(0);
-    
-    
-
-    // add_timer(0, timer_tell_time, 0);
     print_string("Hello, Sailor!\r\n");
     for(;;)
     {
@@ -567,27 +478,37 @@ kernel_main(void *devicetree_addr)
         else
         {
             c8 *file_name = token;
-            void *handle = cpio_find_file(file_name);
-            if(handle)
+            Process *process = create_process(file_name, 0, 0);
+            if(process)
             {
-                um32 len;
-                c8 *content = (c8 *)cpio_get_file_content(handle, &len);
-                void *load_addr = (void *)USER_SPACE_BEGIN;
-                void *stack_end = (void *)USER_SPACE_END;
-                copy_memory(load_addr, content, len);
-                __asm__ volatile("mov x0, 0x340\n"
-                                 "msr spsr_el1, x0\n"
-                                 "msr elr_el1, %0\n"
-                                 "msr sp_el0, %1\n"
-                                 "eret\n"
-                                 :: "r"(load_addr), "r"(stack_end));
+                exit_thread(get_current_thread(), 0);
             }
             else
             {
-                print_string("Unrecognized command: ");
-                print_string(token);
-                print_string("\r\n");
+                print_string("Command not found\r\n");
             }
         }
     }
+}
+
+void
+kernel_main(void *devicetree_addr)
+{
+    enable_simd_instruction();
+    irq_init();
+    mini_uart_init();
+    init_timer_for_core_0();
+    enable_timer_access_for_el0();
+
+    init_kernel_state(&g_kernel_state, devicetree_addr);
+    // print_devicetree(devicetree_addr);
+
+    Process *process = create_empty_process();
+    Thread *thread = create_empty_thread(process);
+    thread->priority = ThreadPriority_normal;
+    set_current_thread(thread);
+    create_thread(process, idle_thread_proc, 0, ThreadPriority_idle,
+                  kilobytes(16), kilobytes(16), CreateThread_kernel);
+
+    launch_kernel_shell(0);
 }
