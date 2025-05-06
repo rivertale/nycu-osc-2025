@@ -94,6 +94,11 @@ syscall_exec(TrapFrame *trap_frame)
         create_process_startup(&process->startup, (ProcessProc *)process->image_addr,
                                arg_count, args);
 
+        process->pending_signal_cur0 = 0;
+        process->pending_signal_cur1 = 0;
+        for(Signal signal = Signal_none; signal < Signal_one_past_last; ++signal)
+            process->signal_handlers[signal] = 0;
+
         for(Link *link = process->thread_link.next;
             link != &process->thread_link;
             link = link->next)
