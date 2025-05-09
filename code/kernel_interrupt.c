@@ -32,11 +32,11 @@ handle_irq_interrupt(TrapFrame *trap_frame)
     // TODO: accept new interrupt in handler
     KernelState *state = &g_kernel_state;
 
-    u32 pending_0 = *(vu32 *)IRQ_PENDING_0;
-    if(pending_0 & IRQ_PENDING_0_SET_1)
+    u32 pending_0 = *(vu32 *)IRQ_PENDING0;
+    if(pending_0 & IRQ_PENDING0_SET1)
     {
         // irq pending 1 has bit set
-        u32 pending_1 = *(vu32 *)IRQ_PENDING_1;
+        u32 pending_1 = *(vu32 *)IRQ_PENDING1;
         if(pending_1 & IRQ_INTERRUPT_AUX)
         {
             // aux interrupt is pending
@@ -65,12 +65,12 @@ handle_irq_interrupt(TrapFrame *trap_frame)
                     state->read_cur1 = (state->read_cur1 + 1) & KERNEL_IO_BUFFER_MASK;
                 }
 
-                *(vu32 *)IRQ_ENABLED_1 |= IRQ_INTERRUPT_AUX;
+                *(vu32 *)IRQ_ENABLED1 |= IRQ_INTERRUPT_AUX;
             }
         }
     }
 
-    if(pending_0 & IRQ_PENDING_0_SET_2)
+    if(pending_0 & IRQ_PENDING0_SET2)
     {
         // irq pending 2 has bit set
         do_nothing;
@@ -169,7 +169,7 @@ handle_interrupt_el1_low_sync(TrapFrame *trap_frame)
             u32 iss = (esr_el1 >> 0) & 0x1ffffff;
             u32 il = (esr_el1 >> 25) & 0x1;
             u32 ec = (esr_el1 >> 26) & 0x3f;
-            u32 iss2 = (esr_el1 >> 32) & 0x7ffffff;
+            u32 iss2 = (esr_el1 >> 32) & 0xffffff;
             u32 res0 = (esr_el1 >> 56) & 0xff;
 
             print_string("spsr_el1=");

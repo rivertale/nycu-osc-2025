@@ -243,7 +243,7 @@ next_token(c8 *token)
 static void
 irq_init(void)
 {
-    *(vu32 *)IRQ_ENABLED_1 |= IRQ_INTERRUPT_AUX;
+    *(vu32 *)IRQ_ENABLED1 |= IRQ_INTERRUPT_AUX;
 }
 
 static void
@@ -296,11 +296,14 @@ init_kernel_state(KernelState *state, void *devicetree_handle)
     DeviceRegionList device_region_list;
     query_device_region_list(&device_region_list, devicetree_handle);
 
+    void *page_table_begin = (void *)0x1000;
+    void *page_table_end = (void *)0x4000;
+        
     umm boot_arena_size = PAGE_MAX_ALLOC_SIZE;
     void *boot_arena_begin = (void *)0x10000000;
     void *boot_arena_end = (void *)((umm)boot_arena_begin + boot_arena_size);
     BootArena *boot_arena = bootstrap_boot_arena(boot_arena_begin, boot_arena_end);
-
+    
     MemoryRegionList *region_list = push_size(boot_arena, sizeof(*region_list));
     init_memory_region_list(region_list, (void *)0x00000000, (void *)0x3c000000);
     reserve_memory_region(region_list,
@@ -309,6 +312,7 @@ init_kernel_state(KernelState *state, void *devicetree_handle)
                           device_region_list.devicetree_begin, device_region_list.devicetree_end);
     reserve_memory_region(region_list, device_region_list.cpio_begin, device_region_list.cpio_end);
     reserve_memory_region(region_list, &kernel_image_begin, &kernel_image_end);
+    reserve_memory_region(region_list, page_table_begin, page_table_end);
     reserve_memory_region(region_list, boot_arena_begin, boot_arena_end);
 
     // timer
@@ -492,16 +496,25 @@ THREAD_PROC(launch_kernel_shell)
 }
 
 void
-kernel_main(void *devicetree_addr)
+kernel_main(void *devicetree_physical_addr)
 {
+    // disable low virtual space
+    u64 pt;
+    u64 z = 0;
+    __asm__ volatile("mov %0, 0x3000\n"
+                     "str %1, [%0]\n"
+                     "msr ttbr0_el1, %0\n"
+                     : "+r"(pt) : "r"(z));
+    
     enable_simd_instruction();
     irq_init();
     mini_uart_init();
     init_timer_for_core_0();
     enable_timer_access_for_el0();
-
-    init_kernel_state(&g_kernel_state, devicetree_addr);
-    // print_devicetree(devicetree_addr);
+    
+    void *devicetree_handle = (void *)(KERNEL_SPACE_OFFSET + devicetree_physical_addr);
+    init_kernel_state(&g_kernel_state, devicetree_handle);
+    // print_devicetree(devicetree_handle);
 
     Process *process = create_empty_process();
     Thread *thread = create_empty_thread(process);

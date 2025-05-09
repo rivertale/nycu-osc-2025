@@ -1,10 +1,11 @@
 #ifndef BOOTLOADER_H
 #define BOOTLOADER_H
 
+#define KERNEL_SPACE_OFFSET 0x0000000000000000ull
+
 #include "common.h"
 #include "intrinsic.h"
 #include "peripheral.h"
-#include "uart.h"
 
 #define BOOTLOADER_STARTUP_ADDR ((void *)0x40000)
 #define KERNEL_STARTUP_ADDR ((void *)0x80000)

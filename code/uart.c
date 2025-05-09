@@ -112,15 +112,14 @@ mini_uart_disable_write_interrupt(void)
 static void
 mini_uart_init(void)
 {
-    *(vu32 *)GPFSEL1 &= ~((GPFSEL_ALT_MASK << 12) | (GPFSEL_ALT_MASK << 15));
-    *(vu32 *)GPFSEL1 |= (GPFSEL_ALT5 << 12) | (GPFSEL_ALT5 << 15);
+    *(vu32 *)GPIO_FSEL_REG1 &= ~(GPIO_FSEL_MASK(4) | GPIO_FSEL_MASK(5));
+    *(vu32 *)GPIO_FSEL_REG1 |= GPIO_FSEL_ALT5(4) | GPIO_FSEL_ALT5(5);
 
-    *(vu32 *)GPPUD = 0;
+    *(vu32 *)GPIO_PUD_REG = GPIO_PUD_OFF;
     wait_cycle(150);
-    *(vu32 *)GPPUDCLK0 = (1 << 14) | (1 << 15);
+    *(vu32 *)GPIO_PUDCLK0_REG = (1 << 14) | (1 << 15);
     wait_cycle(150);
-    *(vu32 *)GPPUD = 0;
-    *(vu32 *)GPPUDCLK0 = 0;
+    *(vu32 *)GPIO_PUDCLK0_REG = 0;
 
     *(vu32 *)AUX_ENABLES = AUX_ENABLES_MINI_UART;
     *(vu32 *)AUX_MU_CNTL_REG = 0;

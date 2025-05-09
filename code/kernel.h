@@ -1,10 +1,12 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 
+#define USER_SPACE_OFFSET 0x0000000000000000ull
+#define KERNEL_SPACE_OFFSET 0xffff000000000000ull
+
 #include "common.h"
 #include "intrinsic.h"
 #include "peripheral.h"
-#include "uart.h"
 #include "kernel_device.h"
 #include "kernel_memory.h"
 

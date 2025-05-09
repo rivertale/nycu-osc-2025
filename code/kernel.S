@@ -14,6 +14,33 @@ _start:
     ldr x0, =stack_end
     mov sp, x0
 
+    ldr x0, =(0 << 14) | (2 << 30) | ((64 - 48) << 0) | ((64 - 48) << 16)
+    msr tcr_el1, x0
+    
+    ldr x0, =(0 << 0) | (0x44 << 8)
+    msr mair_el1, x0
+
+    mov x0, 0x1000
+    mov x1, 0x2000
+    ldr x2, =3
+    orr x2, x1, x2
+    str x2, [x0]
+    
+    ldr x2, =(1 << 10) | (0 << 2) | 1
+    mov x3, 0x00000000
+    orr x3, x2, x3
+    str x3, [x1]
+    
+    mov x3, 0x40000000
+    orr x3, x2, x3
+    str x3, [x1, 8]
+    msr ttbr0_el1, x0
+    msr ttbr1_el1, x0
+    
+    mrs x2, sctlr_el1
+    orr x2, x2, 1
+    msr sctlr_el1, x2
+
     // clear bss
     ldr x0, =bss_begin
     ldr x1, =bss_size
@@ -24,12 +51,13 @@ clear_bss_loop:
     sub x1, x1, #8
     b clear_bss_loop
 clear_bss_done:
-    adr x0, interrupt_vector_table
+    ldr x0, =interrupt_vector_table
     msr vbar_el1, x0
 
-    // restore devicetree addr
+    // restore devicetree physical address
     mov x0, x4
-    bl kernel_main
+    ldr x1, =kernel_main
+    br x1
 
 hang:
     wfe
