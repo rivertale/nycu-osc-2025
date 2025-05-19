@@ -8,15 +8,15 @@ enable_simd_instruction(void)
 static void
 watchdog_reboot(s32 tick)
 {
-    *(vu32 *)PM_RSTC = PM_PASSWORD | PM_RSTC_WRCFG_FULL_RESET;
-    *(vu32 *)PM_WDOG = PM_PASSWORD | tick;
+    *(vu32 *)PM_RSTC_REG = PM_PASSWORD | PM_RSTC_WRCFG_FULL_RESET;
+    *(vu32 *)PM_WDOG_REG = PM_PASSWORD | tick;
 }
 
 static void
 watchdog_cancel_reboot(void)
 {
-    *(vu32 *)PM_RSTC = PM_PASSWORD | 0;
-    *(vu32 *)PM_WDOG = PM_PASSWORD | 0;
+    *(vu32 *)PM_RSTC_REG = PM_PASSWORD | 0;
+    *(vu32 *)PM_WDOG_REG = PM_PASSWORD | 0;
 }
 
 static b32
@@ -24,17 +24,26 @@ mailbox_query(u8 channel, u32 *message)
 {
     b32 result = 0;
     u32 channel_mask = 0xf;
-    u32 mailbox = ((u32)(umm)message & ~channel_mask) | channel;
-    while(*(vu32 *)MAILBOX_STATUS & MAILBOX_FULL)
+    
+    __attribute__((aligned(16))) u32 kernel_message[36];
+    u64 physical_addr = direct_mapped_physical_address(kernel_message);
+    
+    // NOTE: it's a syscall, we assume the process's page table is already loaded
+    copy_memory(kernel_message, message, sizeof(kernel_message));
+    
+    u32 mailbox = ((u32)physical_addr & ~channel_mask) | channel;
+    while(*(vu32 *)MAILBOX_STATUS_REG & MAILBOX_FULL)
         do_nothing;
-    *(vu32 *)MAILBOX_WRITE = mailbox;
+    *(vu32 *)MAILBOX_WRITE_REG = mailbox;
 
-    while(*(vu32 *)MAILBOX_STATUS & MAILBOX_EMPTY)
+    while(*(vu32 *)MAILBOX_STATUS_REG & MAILBOX_EMPTY)
         do_nothing;
 
-    if(*(vu32 *)MAILBOX_READ == mailbox)
-        result = (message[1] == MAILBOX_RESPONSE_SUCCESS);
-
+    if(*(vu32 *)MAILBOX_READ_REG == mailbox)
+        result = (kernel_message[1] == MAILBOX_RESPONSE_SUCCESS);
+    
+    copy_memory(message, kernel_message, sizeof(kernel_message));
+    
     return result;
 }
 
@@ -302,37 +311,4 @@ cpio_find_file(c8 *file_name)
         }
     }
     return result;
-}
-
-static void
-query_device_region_list(DeviceRegionList *list, void *devicetree_handle)
-{
-    clear_memory(list, sizeof(*list));
-    list->spin_table_begin = (void *)0x0000;
-    list->spin_table_end = (void *)0x1000;
-    list->devicetree_begin = devicetree_handle;
-    list->devicetree_end = devicetree_handle + devicetree_get_total_size(devicetree_handle);
-    for(DevicetreeIter iter = iterate_devicetree(devicetree_handle);
-        is_devicetree_iter_valid(&iter);
-        advance_devicetree_iter(&iter))
-    {
-        if(string_match(iter.dir, "/chosen/"))
-        {
-            if(string_match(iter.prop, "linux,initrd-start"))
-            {
-                list->cpio_begin = (void *)(umm)devicetree_u32(iter.data);
-            }
-            else if(string_match(iter.prop, "linux,initrd-end"))
-            {
-                list->cpio_end = (void *)(umm)devicetree_u32(iter.data);
-            }
-        }
-    }
-
-    // ensure every address is initialized
-    for(void **addr = (void **)list; addr < (void **)(list + 1); ++addr)
-    {
-        if(addr != &list->spin_table_begin)
-            assert(*addr);
-    }
 }

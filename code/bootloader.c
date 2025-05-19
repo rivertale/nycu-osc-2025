@@ -30,7 +30,7 @@ load_kernel(void *addr)
 }
 
 void
-bootloader_main(void *devicetree_addr)
+bootloader_main(void *devicetree_physical_addr)
 {
     mini_uart_init();
     for(;;)
@@ -41,7 +41,7 @@ bootloader_main(void *devicetree_addr)
             __asm__ volatile("mov x0, %0\n"
                              "ldr x1, =%1\n"
                              "br x1\n"
-                             :: "r"(devicetree_addr), "i"(KERNEL_STARTUP_ADDR));
+                             :: "r"(devicetree_physical_addr), "i"(KERNEL_STARTUP_ADDR));
         }
     }
 }

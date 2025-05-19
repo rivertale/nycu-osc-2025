@@ -77,7 +77,11 @@ copy_to_signal_frame(SignalFrame *signal_frame, TrapFrame *trap_frame)
 void
 handle_signal(TrapFrame *trap_frame)
 {
+    KernelState *state = &g_kernel_state;
     Thread *thread = get_current_thread();
+    if(!thread)
+        return;
+    assert(thread);
     Process *process = thread->process;
 
     if(process->pending_signal_cur0 != process->pending_signal_cur1)
@@ -90,7 +94,7 @@ handle_signal(TrapFrame *trap_frame)
 
             SignalFrame *signal_frame = (SignalFrame *)(trap_frame->sp_el0 - sizeof(SignalFrame));
             copy_to_signal_frame(signal_frame, trap_frame);
-            trap_frame->lr = (umm)user_space_signal_handler_cleanup;
+            trap_frame->lr = process->bridge_addr + state->signal_handler_cleanup_bridge_offset;
             // NOTE: signal handler is in user mode
             trap_frame->spsr_el1 = USER_THREAD_DEFAULT_PSTATE;
             trap_frame->elr_el1 = (umm)process->signal_handlers[signal];

@@ -56,7 +56,8 @@ yield_physical_thread()
     {
         if(thread->status != ThreadStatus_exited)
             schedule_thread(thread);
-
+        
+        set_current_user_page_table(next_thread->process->page_table);
         switch_context(&next_thread->kernel_sp, &thread->kernel_sp);
     }
 }
@@ -72,9 +73,8 @@ static Thread *
 create_empty_thread(Process *process)
 {
     KernelState *state = &g_kernel_state;
-    MemoryAllocator *allocator = &state->allocator;
 
-    Thread *thread = alloc_memory(allocator, sizeof(*thread));
+    Thread *thread = alloc_kernel_memory(sizeof(*thread));
     thread->id = ++state->prev_created_thread_id;
     thread->process = process;
     double_link_insert_at_last(&process->thread_link, &thread->thread_link);
@@ -86,19 +86,21 @@ create_thread(Process *process, ThreadProc *proc, void *param, s32 priority,
               um32 user_stack_size, um32 kernel_stack_size, u32 flags)
 {
     KernelState *state = &g_kernel_state;
-    MemoryAllocator *allocator = &state->allocator;
 
     Thread *thread = create_empty_thread(process);
     thread->user_stack_size = user_stack_size;
-    thread->user_stack_addr = (umm)alloc_memory(allocator, user_stack_size);
+    thread->user_stack_addr =
+        (umm)alloc_user_memory(process, 0, user_stack_size, AllocationType_commit,
+                               MemoryPermission_read | MemoryPermission_write);
+    
     thread->kernel_stack_size = kernel_stack_size;
-    thread->kernel_stack_addr = (umm)alloc_memory(allocator, kernel_stack_size);
+    thread->kernel_stack_addr = (umm)alloc_kernel_memory(kernel_stack_size);
     thread->kernel_sp = thread->kernel_stack_addr + kernel_stack_size;
     thread->priority = priority;
 
     thread->kernel_sp -= sizeof(TrapFrame);
     TrapFrame *trap_frame = (TrapFrame *)thread->kernel_sp;
-    trap_frame->lr = (umm)user_space_thread_cleanup;
+    trap_frame->lr = process->bridge_addr + state->thread_cleanup_bridge_offset;
     trap_frame->spsr_el1 = (flags & CreateThread_kernel) ?
                            KERNEL_THREAD_DEFAULT_PSTATE : USER_THREAD_DEFAULT_PSTATE;
     trap_frame->elr_el1 = (umm)proc;

@@ -30,11 +30,14 @@ typedef struct Process
     Link process_link;
     Link thread_link;
     ProcessId id;
+    
+    VirtualMemoryTree memory_tree;
+    u64 *page_table;
 
-    ProcessStartup startup;
-
-    u64 image_addr;
-    u64 image_size;
+    umm image_addr;
+    umm image_size;
+    umm bridge_addr;
+    ProcessStartup *startup;
 
     u16 pending_signal_cur0;
     u16 pending_signal_cur1;

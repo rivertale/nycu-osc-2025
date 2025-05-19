@@ -85,6 +85,20 @@ write_cpacr_el1(u64 value)
     __asm__ volatile("msr cpacr_el1, %0" :: "r"(value));
 }
 
+static inline u64
+read_far_el1(void)
+{
+    u64 result;
+    __asm__ volatile("mrs %0, far_el1" : "=r"(result));
+    return result;
+}
+
+static inline void
+write_far_el1(u64 value)
+{
+    __asm__ volatile("msr far_el1, %0" :: "r"(value));
+}
+
 static inline void
 enable_irq_interrupt(void)
 {
@@ -153,7 +167,44 @@ write_tpidr_el1(u64 value)
     __asm__ volatile("msr tpidr_el1, %0" :: "r"(value));
 }
 
-static void
+static inline u64
+read_ttbr0_el1(void)
+{
+    u64 result;
+    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(result));
+    return result;
+}
+
+static inline void
+write_ttbr0_el1(u64 value)
+{
+    __asm__ volatile("msr ttbr0_el1, %0" :: "r"(value));
+}
+
+static inline u64
+read_ttbr1_el1(void)
+{
+    u64 result;
+    __asm__ volatile("mrs %0, ttbr1_el1" : "=r"(result));
+    return result;
+}
+
+static inline void
+write_ttbr1_el1(u64 value)
+{
+    __asm__ volatile("msr ttbr1_el1, %0" :: "r"(value));
+}
+
+// TODO: invalidate the modified tlb only
+static inline void
+invalidate_entire_tlb(void)
+{
+    __asm__ volatile("tlbi vmalle1is\n"
+                     "dsb ish\n"
+                     "isb\n");
+}
+
+static inline void
 wait_cycle(u64 delay)
 {
     __asm__ volatile("1:"

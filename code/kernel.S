@@ -11,9 +11,10 @@ _start:
     mrs x0, mpidr_el1
     and x0, x0, #0xff
     cbnz x0, hang
-    ldr x0, =stack_end
+    ldr x0, =section_stack_high
     mov sp, x0
 
+    // cleanup
     ldr x0, =(0 << 14) | (2 << 30) | ((64 - 48) << 0) | ((64 - 48) << 16)
     msr tcr_el1, x0
     
@@ -42,8 +43,8 @@ _start:
     msr sctlr_el1, x2
 
     // clear bss
-    ldr x0, =bss_begin
-    ldr x1, =bss_size
+    ldr x0, =section_bss_low
+    ldr x1, =section_bss_size
     mov x2, #0
 clear_bss_loop:
     cbz x1, clear_bss_done

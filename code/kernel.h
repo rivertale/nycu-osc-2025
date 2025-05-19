@@ -2,7 +2,9 @@
 #define KERNEL_H
 
 #define USER_SPACE_OFFSET 0x0000000000000000ull
+#define USER_SPACE_SIZE 0x0001000000000000ull
 #define KERNEL_SPACE_OFFSET 0xffff000000000000ull
+#define KERNEL_SPACE_SIZE 0x0001000000000000ull
 
 #include "common.h"
 #include "intrinsic.h"
@@ -32,12 +34,6 @@ typedef struct Timer
     TimerCallback *callback;
     void *userdata;
 } Timer;
-
-typedef struct PrintStringTask
-{
-    MemoryAllocator *allocator;
-    c8 *string;
-} PrintStringTask;
 
 typedef enum InterruptKind
 {
@@ -77,6 +73,9 @@ typedef struct KernelState
     u32 first_prioritized_interrupt;
 
     void *cpio_handle;
+    u64 process_startup_bridge_offset;
+    u64 thread_cleanup_bridge_offset;
+    u64 signal_handler_cleanup_bridge_offset;
 
     u8 read_buffer[KERNEL_MAX_IO_BUFFER_SIZE];
     u8 write_buffer[KERNEL_MAX_IO_BUFFER_SIZE];
@@ -84,8 +83,10 @@ typedef struct KernelState
     InterruptContext interrupts[KERNEL_MAX_INTERRUPT];
 } KernelState;
 
-extern void *kernel_image_begin;
-extern void *kernel_image_end;
+extern void *section_image_low;
+extern void *section_image_high;
+extern void *section_bridge_low;
+extern void *section_bridge_high;
 
 static KernelState g_kernel_state = {0};
 

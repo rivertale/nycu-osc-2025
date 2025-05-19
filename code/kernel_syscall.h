@@ -13,8 +13,9 @@ typedef enum Syscall
     Syscall_send_kill_signal = 7,
     Syscall_set_signal_handler = 8,
     Syscall_send_signal = 9,
-    Syscall_exit_signal_handler = 10,
-    Syscall_exit_current_thread = 11,
+    Syscall_alloc_memory = 10,
+    Syscall_exit_signal_handler = 11,
+    Syscall_exit_current_thread = 12,
 } Syscall;
 
 #endif //KERNEL_SYSCALL_H

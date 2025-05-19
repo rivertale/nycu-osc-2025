@@ -4,15 +4,15 @@
 
 // wrapper for main(), bridging userdata to arg_count and args.
 static
-THREAD_PROC(user_space_process_startup)
+THREAD_PROC(__attribute__((section(".text.bridge"))) bridge_process_startup)
 {
     ProcessStartup *startup = (ProcessStartup *)userdata;
     ExitCode exit_code = startup->proc(startup->arg_count, startup->args);
     return exit_code;
 }
 
-static void __attribute__((naked))
-user_space_thread_cleanup(ExitCode exit_code)
+static void __attribute__((naked, section(".text.bridge")))
+bridge_thread_cleanup(ExitCode exit_code)
 {
     __asm__ volatile("mov x8, %0\n"
                      "svc 0\n"
@@ -20,8 +20,8 @@ user_space_thread_cleanup(ExitCode exit_code)
                      :: "i"(Syscall_exit_current_thread));
 }
 
-static void
-user_space_signal_handler_cleanup(void)
+static void __attribute__((section(".text.bridge")))
+bridge_signal_handler_cleanup(void)
 {
     __asm__ volatile("mov x8, %0\n"
                      "svc 0\n"

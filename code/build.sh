@@ -35,7 +35,7 @@ clang-18 -g -o send_kernel ${code_dir}/send_kernel.c
 echo "Building initial file system..."
 cd ${data_dir}/initramfs
 cp ${build_dir}/user_exception.img ./
-# find . | cpio -o -H newc > ${build_dir}/initramfs.cpio 2> /dev/null
+find . | cpio -o -H newc > ${build_dir}/initramfs.cpio 2> /dev/null
 cd ${build_dir}
 
 rm *.o

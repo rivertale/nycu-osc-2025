@@ -1,29 +1,6 @@
 #ifndef KERNEL_DEVICE_H
 #define KERNEL_DEVICE_H
 
-// watchdog
-#define PM_RSTC 0x3F10001c
-#define PM_WDOG 0x3F100024
-
-#define PM_PASSWORD 0x5a000000
-#define PM_RSTC_WRCFG_FULL_RESET 0x20
-
-// mailbox
-#define MAILBOX_READ 0x3f00b880
-#define MAILBOX_STATUS 0x3f00b898
-#define MAILBOX_WRITE 0x3f00b8a0
-
-#define MAILBOX_EMPTY 0x40000000
-#define MAILBOX_FULL 0x80000000
-
-#define MAILBOX_REQUEST 0x00000000
-#define MAILBOX_RESPONSE_SUCCESS 0x80000000
-#define MAILBOX_RESPONSE_ERROR 0x80000001
-
-#define MAILBOX_TAG_END 0x00000000
-#define MAILBOX_TAG_REQUEST 0x00000000
-#define MAILBOX_TAG_GET_BOARD_REVISION 0x00010002
-#define MAILBOX_TAG_GET_ARM_MEMORY 0x00010005
 
 // devicetree
 #define FDT_BEGIN_NODE 0x00000001
@@ -94,16 +71,5 @@ typedef struct CpioNewcHeader
     // u8[] file content
     // pad to 4-byte boundary
 } CpioNewcHeader;
-
-// TODO: it would be better if we combine it with MemoryRegionList
-typedef struct DeviceRegionList
-{
-    void *devicetree_begin;
-    void *devicetree_end;
-    void *spin_table_begin;
-    void *spin_table_end;
-    void *cpio_begin;
-    void *cpio_end;
-} DeviceRegionList;
 
 #endif //KERNEL_DEVICE_H
