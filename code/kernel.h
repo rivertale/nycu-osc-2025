@@ -5,6 +5,7 @@
 #define USER_SPACE_SIZE 0x0001000000000000ull
 #define KERNEL_SPACE_OFFSET 0xffff000000000000ull
 #define KERNEL_SPACE_SIZE 0x0001000000000000ull
+#define USER_STACK_VIRTUAL_ADDR 0x0000ffffffffb000ull
 
 #include "common.h"
 #include "intrinsic.h"

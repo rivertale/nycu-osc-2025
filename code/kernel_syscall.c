@@ -117,7 +117,7 @@ syscall_exec(TrapFrame *trap_frame)
         
         // we freed all user stacks, reallocate a stack for the calling thread
         thread->user_stack_addr =
-            (umm)alloc_user_memory(process, 0, thread->user_stack_size,
+        (umm)alloc_user_memory(process, (void *)thread->user_stack_addr, thread->user_stack_size,
                                    AllocationType_demand,
                                    MemoryPermission_read | MemoryPermission_write, 0, 0);
 
@@ -164,6 +164,8 @@ syscall_fork(TrapFrame *trap_frame)
     Process *new_process = create_empty_process();
     new_process->image_size = old_process->image_size;
     new_process->image_addr = old_process->image_addr;
+    new_process->bridge_addr = old_process->bridge_addr;
+    new_process->startup = old_process->startup;
     
     for(Signal signal = Signal_none; signal < Signal_one_past_last; ++signal)
         new_process->signal_handlers[signal] = old_process->signal_handlers[signal];

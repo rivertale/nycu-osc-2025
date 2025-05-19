@@ -25,7 +25,7 @@ done
 
 # build
 cd ..
-docker run --rm --interactive --tty --privileged --security-opt seccomp=unconfined \
+docker run -e "DISPLAY=${DISPLAY:-:0.0}" -v /tmp/.X11-unix:/tmp/.X11-unix --rm --interactive --tty --privileged --security-opt seccomp=unconfined \
     --volume "$(pwd):$(pwd)" \
     --workdir "$(pwd)/code" \
     --name "${container_name}" \

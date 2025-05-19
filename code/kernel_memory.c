@@ -1282,6 +1282,9 @@ duplicate_user_space(Process *to, Process *from)
         umm addr = from_node->low;
         umm size = from_node->high - from_node->low;
         VirtualMemoryNode *to_node = map_virtual_memory_node(&to->memory_tree, addr, size);
+        to_node->file = from_node->file;
+        to_node->file_offset = from_node->file_offset;
+        
         assert(to_node);
         set_virtual_memory_node_flags_except_color(to_node, from_node->parent_and_flags);
         
