@@ -1374,15 +1374,9 @@ decrement_page_entry_reference(u64 *page_table, umm virtual_addr)
 static void
 map_page(u64 *page_table, VirtualMemoryNode *node, umm virtual_addr, u64 physical_addr)
 {
-    //mini_uart_write_u64(virtual_addr);
-    //mini_uart_write_const("A\r\n");
-    //mini_uart_write_u64(physical_addr);
-    //mini_uart_write_const("A\r\n");
     if(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_READ)
     {
-        //mini_uart_echo();
         u64 *entry = ensure_page_entry_exist(page_table, virtual_addr);
-        //mini_uart_echo();
         u64 attrib = PAGE_ATTRIB_ACCESS | PAGE_ATTRIB_L3_PAGE | PAGE_ATTRIB_PXN;
         if(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_WRITE)
             attrib |= PAGE_ATTRIB_RW_EL0;
@@ -1397,21 +1391,17 @@ map_page(u64 *page_table, VirtualMemoryNode *node, umm virtual_addr, u64 physica
         if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_EXECUTE))
             attrib |= PAGE_ATTRIB_UXN;
         
-        //mini_uart_echo();
         if(!physical_addr)
         {
             void *page = alloc_pages(PAGE_SIZE);
             physical_addr = direct_mapped_physical_address(page);
         }
-        //mini_uart_echo();
         
         if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_DEVICE))
             increment_page_reference(physical_addr);
-        //mini_uart_echo();
         
         *entry = physical_addr | attrib;
     }
-    //mini_uart_write_const("DONE\r\n");
 }
 
 static void *
@@ -1432,7 +1422,6 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
         if(!node)
             node = insert_virtual_memory_node(tree, size);
         
-        //mini_uart_echo();
         if(node)
         {
             result = (void *)node->low;
@@ -1444,11 +1433,6 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
             if(permission & MemoryPermission_execute)
                 node->parent_and_flags |= VIRTUAL_MEMORY_FLAG_EXECUTE;
             
-            //mini_uart_write_const("OOOOO\r\n");
-            //mini_uart_write_u64(node->low);
-            //mini_uart_write_const("OOOOO\r\n");
-            //mini_uart_write_u64(node->high);
-            //mini_uart_write_const("OOOOO\r\n");
             if(type == AllocationType_commit)
             {
                 for(umm virtual_addr = node->low;
@@ -1459,7 +1443,6 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
                 }
                 invalidate_entire_tlb();
             }
-            //mini_uart_write_const("HHHHH\r\n");
         }
     }
     return result;

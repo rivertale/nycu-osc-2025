@@ -21,7 +21,7 @@ mini_uart_write_byte(u8 byte)
 }
 
 static void
-mini_uart_echo_(void)
+mini_uart_echo(void)
 {
     u8 c = mini_uart_read_byte();
     mini_uart_write_byte(c);
@@ -78,6 +78,14 @@ mini_uart_write_hex64(u64 value)
     c8 digits[] =
     {
         '0', 'x',
+        hex_digit[(value >> 60) & 0xf],
+        hex_digit[(value >> 56) & 0xf],
+        hex_digit[(value >> 52) & 0xf],
+        hex_digit[(value >> 48) & 0xf],
+        hex_digit[(value >> 44) & 0xf],
+        hex_digit[(value >> 40) & 0xf],
+        hex_digit[(value >> 36) & 0xf],
+        hex_digit[(value >> 32) & 0xf],
         hex_digit[(value >> 28) & 0xf],
         hex_digit[(value >> 24) & 0xf],
         hex_digit[(value >> 20) & 0xf],

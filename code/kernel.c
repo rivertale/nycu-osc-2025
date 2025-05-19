@@ -547,7 +547,6 @@ THREAD_PROC(launch_kernel_shell)
 void
 kernel_main(u64 devicetree_physical_addr)
 {
-    
     // disable low virtual space
     u64 pt;
     u64 z = 0;
