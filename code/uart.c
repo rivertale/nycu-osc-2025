@@ -21,7 +21,7 @@ mini_uart_write_byte(u8 byte)
 }
 
 static void
-mini_uart_echo(void)
+mini_uart_echo_(void)
 {
     u8 c = mini_uart_read_byte();
     mini_uart_write_byte(c);
