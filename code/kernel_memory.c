@@ -904,12 +904,14 @@ insert_virtual_memory_node(VirtualMemoryTree *tree, umm size)
     if(empty_range.link)
     {
         result = alloc_kernel_memory(sizeof(*result));
+        
         result->low = empty_range.addr;
         result->high = empty_range.addr + size;
         result->parent_and_flags = (umm)empty_range.parent | VIRTUAL_MEMORY_COLOR_RED;
         *empty_range.link = result;
         fixup_virtual_memory_node_insertion(tree, result);
     }
+    
     return result;
 }
 
@@ -1110,7 +1112,6 @@ get_page_entry(u64 *page_table, void *virtual_addr)
 static u32
 increment_page_reference(u64 physical_addr)
 {
-    return 0;
     PagePool *page_pool = &g_kernel_state.page_pool;
     PageInfo *page_info = get_page_info(direct_mapped_virtual_address(physical_addr));
     
@@ -1120,7 +1121,6 @@ increment_page_reference(u64 physical_addr)
 static u32
 decrement_page_reference(u64 physical_addr)
 {
-    return 0;
     PagePool *page_pool = &g_kernel_state.page_pool;
     PageInfo *page_info = get_page_info(direct_mapped_virtual_address(physical_addr));
     {
@@ -1202,35 +1202,11 @@ iterate_l3_page_entry(u64 *page_table)
 }
 
 static void
-duplicate_virtual_memory_tree(VirtualMemoryTree *to, VirtualMemoryTree *from)
+duplicate_user_space(Process *to, Process *from)
 {
-    VirtualMemoryNode *from_node = from->root;
-    
-    if(from_node)
-    {
-        while(from_node->lhs)
-            from_node = from_node->lhs;
-    }
-    
-    while(from_node)
-    {
-        umm addr = from_node->low;
-        umm size = from_node->high - from_node->low;
-        VirtualMemoryNode *to_node = map_virtual_memory_node(to, addr, size);
-        assert(to_node);
-        set_virtual_memory_node_flags_except_color(to_node, from_node->parent_and_flags);
-        
-        
-        
-        from_node = next_virtual_memory_node(from_node);
-    }
-}
-
-static void
-duplicate_page_table(u64 **to_table, u64 **from_table)
-{
+    // copy page entries
     u64 *to_l0_table = (u64 *)alloc_pages(PAGE_TABLE_SIZE);
-    u64 *from_l0_table = *from_table;
+    u64 *from_l0_table = from->page_table;
     s32 l0_count = PAGE_TABLE_SIZE >> 3;
     s32 l1_count = PAGE_TABLE_SIZE >> 3;
     s32 l2_count = PAGE_TABLE_SIZE >> 3;
@@ -1278,12 +1254,42 @@ duplicate_page_table(u64 **to_table, u64 **from_table)
                     
                     to_l3_table[l3_index] = from_l3_table[l3_index];
                     increment_page_reference(direct_mapped_physical_address(to_l3_table));
-                    increment_page_reference(to_l3_table[l3_index] & PAGE_ADDR_MASK);
                 }
             }
         }
     }
-    *to_table = to_l0_table;
+    to->page_table = to_l0_table;
+    
+    // copy memory tree
+    VirtualMemoryNode *from_node = from->memory_tree.root;
+    if(from_node)
+    {
+        while(from_node->lhs)
+            from_node = from_node->lhs;
+    }
+    
+    while(from_node)
+    {
+        umm addr = from_node->low;
+        umm size = from_node->high - from_node->low;
+        VirtualMemoryNode *to_node = map_virtual_memory_node(&to->memory_tree, addr, size);
+        assert(to_node);
+        set_virtual_memory_node_flags_except_color(to_node, from_node->parent_and_flags);
+        
+        if(!(to_node->parent_and_flags & VIRTUAL_MEMORY_FLAG_MAPPED))
+        {
+            for(umm virtual_addr = to_node->low;
+                virtual_addr < to_node->high;
+                virtual_addr += PAGE_SIZE)
+            {
+                u64 *entry = get_page_entry(to_l0_table, (void *)virtual_addr);
+                u64 physical_addr = *entry & PAGE_ADDR_MASK;
+                increment_page_reference(physical_addr);
+            }
+        }
+        
+        from_node = next_virtual_memory_node(from_node);
+    }
 }
 
 static u64 *
@@ -1368,9 +1374,15 @@ decrement_page_entry_reference(u64 *page_table, umm virtual_addr)
 static void
 map_page(u64 *page_table, VirtualMemoryNode *node, umm virtual_addr, u64 physical_addr)
 {
+    mini_uart_write_u64(virtual_addr);
+    mini_uart_write_const("A\r\n");
+    mini_uart_write_u64(physical_addr);
+    mini_uart_write_const("A\r\n");
     if(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_READ)
     {
+        mini_uart_echo();
         u64 *entry = ensure_page_entry_exist(page_table, virtual_addr);
+        mini_uart_echo();
         u64 attrib = PAGE_ATTRIB_ACCESS | PAGE_ATTRIB_L3_PAGE | PAGE_ATTRIB_PXN;
         if(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_WRITE)
             attrib |= PAGE_ATTRIB_RW_EL0;
@@ -1385,14 +1397,21 @@ map_page(u64 *page_table, VirtualMemoryNode *node, umm virtual_addr, u64 physica
         if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_EXECUTE))
             attrib |= PAGE_ATTRIB_UXN;
         
+        mini_uart_echo();
         if(!physical_addr)
         {
             void *page = alloc_pages(PAGE_SIZE);
             physical_addr = direct_mapped_physical_address(page);
-            increment_page_reference(physical_addr);
         }
+        mini_uart_echo();
+        
+        if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_DEVICE))
+            increment_page_reference(physical_addr);
+        mini_uart_echo();
+        
         *entry = physical_addr | attrib;
     }
+    mini_uart_write_const("DONE\r\n");
 }
 
 static void *
@@ -1413,6 +1432,7 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
         if(!node)
             node = insert_virtual_memory_node(tree, size);
         
+        mini_uart_echo();
         if(node)
         {
             result = (void *)node->low;
@@ -1424,6 +1444,11 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
             if(permission & MemoryPermission_execute)
                 node->parent_and_flags |= VIRTUAL_MEMORY_FLAG_EXECUTE;
             
+            mini_uart_write_const("OOOOO\r\n");
+            mini_uart_write_u64(node->low);
+            mini_uart_write_const("OOOOO\r\n");
+            mini_uart_write_u64(node->high);
+            mini_uart_write_const("OOOOO\r\n");
             if(type == AllocationType_commit)
             {
                 for(umm virtual_addr = node->low;
@@ -1434,6 +1459,7 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
                 }
                 invalidate_entire_tlb();
             }
+            mini_uart_write_const("HHHHH\r\n");
         }
     }
     return result;
@@ -1516,8 +1542,8 @@ free_user_memory(Process *process, void *user_addr)
             u64 *entry = get_page_entry(process->page_table, (void *)virtual_addr);
             u64 physical_addr = *entry & PAGE_ADDR_MASK;
             
-            decrement_page_reference(physical_addr);
-            decrement_page_entry_reference(process->page_table, virtual_addr);
+            if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_MAPPED))
+                decrement_page_reference(physical_addr);
         }
         
         remove_virtual_memory_node(tree, node);
@@ -1600,7 +1626,9 @@ handle_copy_on_write(Process *process, void *fault_addr)
             void *old_page = direct_mapped_virtual_address(old_entry & PAGE_ADDR_MASK);
             void *new_page = direct_mapped_virtual_address(*entry & PAGE_ADDR_MASK);
             copy_memory(new_page, old_page, PAGE_SIZE);
-            decrement_page_reference(direct_mapped_physical_address(old_page));
+            
+            if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_MAPPED))
+                decrement_page_reference(direct_mapped_physical_address(old_page));
         }
     }
     else

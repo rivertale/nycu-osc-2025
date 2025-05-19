@@ -174,8 +174,7 @@ syscall_fork(TrapFrame *trap_frame)
     {
         *iter.entry = (*iter.entry & ~PAGE_ATTRIB_RW_MASK) | PAGE_ATTRIB_RO_EL0;
     }
-    duplicate_virtual_memory_tree(&new_process->memory_tree, &old_process->memory_tree);
-    duplicate_page_table(&new_process->page_table, &old_process->page_table);
+    duplicate_user_space(new_process, old_process);
     
     
     Thread *new_thread = create_empty_thread(new_process);
@@ -198,7 +197,7 @@ syscall_fork(TrapFrame *trap_frame)
     new_switch_frame->tpidr_el1 = (umm)new_thread;
 
     old_trap_frame->x0 = new_process->id;
-    // schedule_thread(new_thread);
+    schedule_thread(new_thread);
 }
 
 static void

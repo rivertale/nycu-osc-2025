@@ -547,6 +547,7 @@ THREAD_PROC(launch_kernel_shell)
 void
 kernel_main(u64 devicetree_physical_addr)
 {
+    
     // disable low virtual space
     u64 pt;
     u64 z = 0;
@@ -567,6 +568,6 @@ kernel_main(u64 devicetree_physical_addr)
     Process *process = get_current_thread()->process;
     create_thread(process, idle_thread_proc, 0, ThreadPriority_idle,
                   kilobytes(16), kilobytes(16), CreateThread_kernel);
-
+    
     launch_kernel_shell(0);
 }
