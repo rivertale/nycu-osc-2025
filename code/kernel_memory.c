@@ -1594,7 +1594,7 @@ handle_copy_on_write(Process *process, void *fault_addr)
 {
     VirtualMemoryTree *tree = &process->memory_tree;
     VirtualMemoryNode *node = find_virtual_memory_node(tree, fault_addr);
-    if(node && node->parent_and_flags & (VIRTUAL_MEMORY_FLAG_READ | VIRTUAL_MEMORY_FLAG_WRITE))
+    if(node && (node->parent_and_flags & (VIRTUAL_MEMORY_FLAG_READ | VIRTUAL_MEMORY_FLAG_WRITE)))
     {
         u64 *entry = get_page_entry(process->page_table, fault_addr);
         u64 attrib = (*entry & ~(PAGE_ADDR_MASK | PAGE_ATTRIB_RW_MASK)) | PAGE_ATTRIB_RW_EL0;
