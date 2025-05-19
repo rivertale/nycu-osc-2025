@@ -56,9 +56,8 @@ create_process_startup(Process *process, ProcessProc *proc, s32 arg_count, c8 **
     
     ProcessStartup kernel_startup = {0};
     ProcessStartup *user_startup =
-        alloc_user_memory(process, 0, user_size,
-                          AllocationType_commit,
-                          MemoryPermission_read | MemoryPermission_write);
+        alloc_user_memory(process, 0, user_size, AllocationType_commit,
+                          MemoryPermission_read | MemoryPermission_write, 0, 0);
     c8 **user_args = (c8 **)(user_startup + 1);
     c8 *user_arg_cur = (c8 *)(user_args + arg_count);
     
@@ -96,15 +95,13 @@ load_initial_process_image(Process *process, u8 *image, um32 image_size,
     assert(peripheral);
     
     process->image_size = image_size;
-    process->image_addr = (umm)alloc_user_memory(process, 0, image_size,
-                                                 AllocationType_commit, execute_permission);
-    copy_to_user(process, (void *)process->image_addr, image, image_size);
+    process->image_addr = (umm)alloc_user_memory(process, 0, image_size, AllocationType_demand,
+                                                 execute_permission, image, 0);
     
     umm bridge_physical_addr = direct_mapped_physical_address((umm)&section_bridge_low);
     umm bridge_size = (umm)&section_bridge_high - (umm)&section_bridge_low;
     process->bridge_addr = (umm)map_user_memory(process,
-                                                bridge_physical_addr,
-                                                bridge_size,
+                                                bridge_physical_addr, bridge_size,
                                                 AllocationType_commit, execute_permission);
     
     create_process_startup(process, (ProcessProc *)process->image_addr, arg_count, kernel_args);

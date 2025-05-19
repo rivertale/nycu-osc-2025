@@ -11,7 +11,6 @@ read_console(void *buffer, umm size)
     {
         if(state->read_cur0 != state->read_cur1)
         {
-            u64 *entry = get_page_entry(get_current_thread()->process->page_table, byte);
             *byte++ = state->read_buffer[state->read_cur0];
             state->read_cur0 = (state->read_cur0 + 1) & KERNEL_IO_BUFFER_MASK;
             --byte_left;
@@ -106,10 +105,12 @@ syscall_exec(TrapFrame *trap_frame)
         
         while(process->memory_tree.root)
             free_user_memory(process, (void *)process->memory_tree.root->low);
+        invalidate_entire_tlb();
         
         um32 image_size;
         u8 *image = cpio_get_file_content(handle, &image_size);
         load_initial_process_image(process, image, image_size, arg_count, kernel_args);
+        
         
         free_kernel_memory(kernel_arg_memory);
         free_kernel_memory(kernel_args);
@@ -117,8 +118,8 @@ syscall_exec(TrapFrame *trap_frame)
         // we freed all user stacks, reallocate a stack for the calling thread
         thread->user_stack_addr =
             (umm)alloc_user_memory(process, 0, thread->user_stack_size,
-                                   AllocationType_commit,
-                                   MemoryPermission_read | MemoryPermission_write);
+                                   AllocationType_demand,
+                                   MemoryPermission_read | MemoryPermission_write, 0, 0);
 
         process->pending_signal_cur0 = 0;
         process->pending_signal_cur1 = 0;
@@ -268,7 +269,7 @@ syscall_alloc_memory(TrapFrame *trap_frame)
     umm size = trap_frame->x1;
     s32 prot = trap_frame->x2;
     s32 flags = trap_frame->x3;
-    s32 fd = trap_frame->x4;
+    void *file = (void *)trap_frame->x4;
     s32 file_offset = trap_frame->x5;
     
     if(flags & 0x20) // MAP_ANONYMOUS
@@ -285,7 +286,8 @@ syscall_alloc_memory(TrapFrame *trap_frame)
         if(prot & 0x4) // PROT_EXEC
             permission |= MemoryPermission_execute;
         
-        trap_frame->x0 = (umm)alloc_user_memory(process, addr, size, type, permission);
+        trap_frame->x0 = (umm)alloc_user_memory(process, addr, size, type, permission,
+                                                file, file_offset);
     }
     else
     {

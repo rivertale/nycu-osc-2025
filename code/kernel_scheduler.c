@@ -90,8 +90,8 @@ create_thread(Process *process, ThreadProc *proc, void *param, s32 priority,
     Thread *thread = create_empty_thread(process);
     thread->user_stack_size = user_stack_size;
     thread->user_stack_addr =
-        (umm)alloc_user_memory(process, 0, user_stack_size, AllocationType_commit,
-                               MemoryPermission_read | MemoryPermission_write);
+        (umm)alloc_user_memory(process, 0, user_stack_size, AllocationType_demand,
+                               MemoryPermission_read | MemoryPermission_write, 0, 0);
     
     thread->kernel_stack_size = kernel_stack_size;
     thread->kernel_stack_addr = (umm)alloc_kernel_memory(kernel_stack_size);

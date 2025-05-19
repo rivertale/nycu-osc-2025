@@ -929,6 +929,8 @@ remove_virtual_memory_node(VirtualMemoryTree *tree, VirtualMemoryNode *deleted)
         
         deleted->low = successor->low;
         deleted->high = successor->high;
+        deleted->file = successor->file;
+        deleted->file_offset = successor->file_offset;
         set_virtual_memory_node_flags_except_color(deleted, successor->parent_and_flags);
         deleted = successor;
     }
@@ -941,6 +943,8 @@ remove_virtual_memory_node(VirtualMemoryTree *tree, VirtualMemoryNode *deleted)
         
         deleted->low = deleted->lhs->low;
         deleted->high = deleted->lhs->high;
+        deleted->file = deleted->lhs->file;
+        deleted->file_offset = deleted->lhs->file_offset;
         set_virtual_memory_node_flags_except_color(deleted, deleted->lhs->parent_and_flags);
         deleted = deleted->lhs;
     }
@@ -952,6 +956,8 @@ remove_virtual_memory_node(VirtualMemoryTree *tree, VirtualMemoryNode *deleted)
         
         deleted->low = deleted->rhs->low;
         deleted->high = deleted->rhs->high;
+        deleted->file = deleted->rhs->file;
+        deleted->file_offset = deleted->rhs->file_offset;
         set_virtual_memory_node_flags_except_color(deleted, deleted->rhs->parent_and_flags);
         deleted = deleted->rhs;
     }
@@ -1397,6 +1403,12 @@ map_page(u64 *page_table, VirtualMemoryNode *node, umm virtual_addr, u64 physica
         if(!physical_addr)
         {
             void *page = alloc_pages(PAGE_SIZE);
+            if(node->file)
+            {
+                copy_memory(page, node->file + node->file_offset + (virtual_addr - node->low),
+                            PAGE_SIZE);
+            }
+            
             physical_addr = direct_mapped_physical_address(page);
         }
         
@@ -1409,7 +1421,7 @@ map_page(u64 *page_table, VirtualMemoryNode *node, umm virtual_addr, u64 physica
 
 static void *
 alloc_user_memory(Process *process, void *addr_hint, umm size,
-                  AllocationType type, MemoryPermission permission)
+                  AllocationType type, MemoryPermission permission, void *file, u64 file_offset)
 {
     void *result = 0;
     if(size > 0)
@@ -1428,6 +1440,9 @@ alloc_user_memory(Process *process, void *addr_hint, umm size,
         if(node)
         {
             result = (void *)node->low;
+            
+            node->file = file;
+            node->file_offset = file_offset;
             
             if(permission & MemoryPermission_read)
                 node->parent_and_flags |= VIRTUAL_MEMORY_FLAG_READ;
@@ -1526,10 +1541,13 @@ free_user_memory(Process *process, void *user_addr)
         for(umm virtual_addr = node->low; virtual_addr < node->high; virtual_addr += PAGE_SIZE)
         {
             u64 *entry = get_page_entry(process->page_table, (void *)virtual_addr);
-            u64 physical_addr = *entry & PAGE_ADDR_MASK;
-            
-            if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_MAPPED))
+            if(*entry && !(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_MAPPED))
+            {
+                u64 physical_addr = *entry & PAGE_ADDR_MASK;
+                *entry = 0;
                 decrement_page_reference(physical_addr);
+                decrement_page_entry_reference(process->page_table, virtual_addr);
+            }
         }
         
         remove_virtual_memory_node(tree, node);
@@ -1571,7 +1589,8 @@ handle_page_fault(Process *process, void *fault_addr)
     VirtualMemoryNode *node = find_virtual_memory_node(tree, fault_addr);
     if(node)
     {
-        map_page(process->page_table, node, (umm)fault_addr, 0);
+        umm virtual_addr = align_down((umm)fault_addr, PAGE_SIZE);
+        map_page(process->page_table, node, (umm)virtual_addr, 0);
         invalidate_entire_tlb();
         
         print_string("[Translation fault]: ");
@@ -1590,7 +1609,7 @@ handle_page_fault(Process *process, void *fault_addr)
 
 // FIXME: we assume the page fault is 1 byte only?
 static void
-handle_copy_on_write(Process *process, void *fault_addr)
+handle_permission_fault(Process *process, void *fault_addr)
 {
     VirtualMemoryTree *tree = &process->memory_tree;
     VirtualMemoryNode *node = find_virtual_memory_node(tree, fault_addr);
@@ -1619,6 +1638,10 @@ handle_copy_on_write(Process *process, void *fault_addr)
             
             if(!(node->parent_and_flags & VIRTUAL_MEMORY_FLAG_MAPPED))
                 decrement_page_reference(direct_mapped_physical_address(old_page));
+            
+            print_string("[Copy on Write]: ");
+            print_hex64((umm)fault_addr);
+            print_string("\r\n");
         }
     }
     else

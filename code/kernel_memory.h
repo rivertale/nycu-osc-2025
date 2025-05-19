@@ -156,8 +156,11 @@ typedef struct MemoryAllocator
 typedef struct VirtualMemoryNode
 {
     umm low, high;
-    
     umm parent_and_flags;
+    
+    void *file;
+    u64 file_offset;
+    
     struct VirtualMemoryNode *lhs;
     struct VirtualMemoryNode *rhs;
 } VirtualMemoryNode;

@@ -150,8 +150,10 @@ handle_sync_interrupt(TrapFrame *trap_frame)
             handle_syscall(trap_frame);
             disable_irq_interrupt();
         } break;
-        case 0x24: // page fault from el0
-        case 0x25: // page fault from el1
+        case 0x20: // inst abort fault from el0
+        case 0x21: // inst abort fault from el1
+        case 0x24: // data abort fault from el0
+        case 0x25: // data abort fault from el1
         {
             switch(iss & 0x3f)
             {
@@ -171,7 +173,7 @@ handle_sync_interrupt(TrapFrame *trap_frame)
                 {
                     Thread *thread = get_current_thread();
                     void *fault_addr = (void *)read_far_el1();
-                    handle_copy_on_write(thread->process, fault_addr);
+                    handle_permission_fault(thread->process, fault_addr);
                 } break;
                 default:
                 {
