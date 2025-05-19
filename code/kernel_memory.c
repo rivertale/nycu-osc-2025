@@ -3,6 +3,9 @@
 #define direct_mapped_virtual_address(physical_addr) \
 ((void *)((u64)(physical_addr) + KERNEL_DIRECT_MAP_OFFSET))
 
+static void yield_physical_thread(void);
+static void exit_process(Process *process, ExitCode exit_code);
+
 #if 0
 static void *
 push_size(BootArena *arena, umm size)
@@ -1580,6 +1583,8 @@ handle_page_fault(Process *process, void *fault_addr)
         print_string("[Segmentation fault]: ");
         print_hex64((umm)fault_addr);
         print_string("\r\n");
+        exit_process(process, 1);
+        yield_physical_thread();
     }
 }
 
@@ -1619,5 +1624,7 @@ handle_copy_on_write(Process *process, void *fault_addr)
         print_string("[Segmentation fault]: ");
         print_hex64((umm)fault_addr);
         print_string("\r\n");
+        exit_process(process, 1);
+        yield_physical_thread();
     }
 }
